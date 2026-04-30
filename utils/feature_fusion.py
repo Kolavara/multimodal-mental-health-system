@@ -85,8 +85,8 @@ class FeatureFusionEngine:
         facial_distress = max(0.0, min(1.0, -fv))
         content_distress = self.latest_speech.get('content_distress', 0.0)
 
-        # 50/50 blend at the moment the user interacted
-        blended = (facial_distress * 0.50) + (content_distress * 0.50)
+        # 60% visual (facial) / 40% text (conversation) blend
+        blended = (facial_distress * 0.60) + (content_distress * 0.40)
         blended = min(1.0, max(0.0, blended))
 
         self.severity_history.append(blended)

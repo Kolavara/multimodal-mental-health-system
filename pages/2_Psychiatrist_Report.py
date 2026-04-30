@@ -296,11 +296,28 @@ if patient_data:
 
             # ── AUTO-SAVE to database ──────────────────────────
             try:
-                from utils.db import update_report_integrated, update_report_psychiatrist, get_latest_report_id, save_report
+                from utils.db import update_report_integrated, update_report_psychiatrist, update_report_severity, get_latest_report_id, save_report
                 import json
 
                 user_id = st.session_state.get("user_id")
                 report_id = st.session_state.get("current_report_id")
+
+                # ── Calculate blended severity: 50% psychological + 50% psychiatric ──
+                # Psychological severity (from fusion engine)
+                psych_severity = 0.0
+                if hasattr(st.session_state, "fusion_engine"):
+                    live = st.session_state.fusion_engine.get_state()
+                    psych_severity = live.get('average_severity_score', 0.0)
+                elif "clinical_state" in st.session_state:
+                    psych_severity = st.session_state.clinical_state.get("average_severity_score", 0.0)
+
+                # Psychiatric severity (from abnormality ratio)
+                total_params = len(abnormal) + len(normal)
+                psychiatric_severity = len(abnormal) / total_params if total_params > 0 else 0.0
+
+                # Blended: 50% psychological + 50% psychiatric
+                blended_severity = (psych_severity * 0.50) + (psychiatric_severity * 0.50)
+                blended_severity = min(1.0, max(0.0, blended_severity))
 
                 if user_id and report_id:
                     # Update existing report with psychiatrist + integrated data
@@ -308,6 +325,7 @@ if patient_data:
                     abnormal_list = [{"param": e["param"], "value": e["value"], "disorder": e["disorder"], "solution": e["solution"]} for e in abnormal]
                     update_report_psychiatrist(report_id, params_dict, abnormal_list)
                     update_report_integrated(report_id, response.content)
+                    update_report_severity(report_id, blended_severity)
                 elif user_id:
                     # No existing report — create a new one with psychiatrist data
                     params_dict = {e["param"]: e["value"] for e in abnormal + normal}
@@ -321,6 +339,7 @@ if patient_data:
                         psychiatrist_params=params_dict,
                         psychiatrist_abnormalities=abnormal_list,
                         integrated_summary=response.content,
+                        avg_severity=blended_severity,
                     )
                     st.session_state["current_report_id"] = rid
             except Exception as db_err:

@@ -175,6 +175,18 @@ def update_report_psychiatrist(report_id: int, params: dict, abnormalities: list
     conn.close()
 
 
+def update_report_severity(report_id: int, avg_severity: float):
+    """Update the avg_severity of an existing report (e.g. after blending psych + psychiatrist)."""
+    conn = _get_conn()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE reports SET avg_severity = ? WHERE id = ?",
+        (avg_severity, report_id)
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_latest_report_id(user_id: int) -> int | None:
     """Get the most recent report ID for a user."""
     conn = _get_conn()
