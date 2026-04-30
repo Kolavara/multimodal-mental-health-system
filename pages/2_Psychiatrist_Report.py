@@ -212,52 +212,73 @@ if patient_data:
 
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── Combined Clinical Summary (Psychologist + Psychiatrist) ──
+
+# ══════════════════════════════════════════════════════════════
+# INTEGRATED DIAGNOSIS — works with psychological, psychiatric, or both
+# ══════════════════════════════════════════════════════════════
+psych_eval = st.session_state.get("evaluation_result", None)
+has_psychological = psych_eval is not None
+has_psychiatric = patient_data is not None
+
+if has_psychological or has_psychiatric:
     st.markdown('<div class="neu-card">', unsafe_allow_html=True)
     st.markdown('<p class="section-header">🧬 Integrated Clinical Summary</p>', unsafe_allow_html=True)
 
-    # Gather the psychologist evaluation if available
-    psych_eval = st.session_state.get("evaluation_result", None)
-
-    # Build the psychiatrist findings text
+    # ── Build psychiatrist findings text ──────────────────────
+    abnormal = []
+    normal = []
     psych_report_lines = []
-    for entry in abnormal:
-        psych_report_lines.append(
-            f"- {entry['param']}: {entry['value']} (Normal: {entry['min']}–{entry['max']}) → {entry['disorder']}"
-        )
-    for entry in normal:
-        psych_report_lines.append(
-            f"- {entry['param']}: {entry['value']} (Normal: {entry['min']}–{entry['max']}) → Within normal limits"
-        )
-    psychiatrist_text = "\n".join(psych_report_lines) if psych_report_lines else "No psychiatric parameters available."
+    if has_psychiatric:
+        _, abnormal, normal = generate_report(patient_data)
+        for entry in abnormal:
+            psych_report_lines.append(
+                f"- {entry['param']}: {entry['value']} (Normal: {entry['min']}–{entry['max']}) → {entry['disorder']}"
+            )
+        for entry in normal:
+            psych_report_lines.append(
+                f"- {entry['param']}: {entry['value']} (Normal: {entry['min']}–{entry['max']}) → Within normal limits"
+            )
+    psychiatrist_text = "\n".join(psych_report_lines) if psych_report_lines else "No psychiatric lab/scale data provided."
 
-    # Build the psychologist text
-    if psych_eval:
+    # ── Build psychologist findings text ──────────────────────
+    if has_psychological:
         psychologist_text = (
             f"Facial Analysis: {psych_eval.get('facial', 'N/A')}\n"
             f"Conversation Analysis: {psych_eval.get('conversation', 'N/A')}\n"
             f"Agent Conclusion: {psych_eval.get('conclusion', 'N/A')}"
         )
     else:
-        psychologist_text = "No psychologist session evaluation available. Run a session on the main app first."
+        psychologist_text = "No psychologist session evaluation available."
 
+    # ── Display source data previews ─────────────────────────
     st.markdown("##### 🧠 Psychologist Session Evaluation")
-    if psych_eval:
+    if has_psychological:
         with st.expander("View Psychologist Findings", expanded=False):
             st.write(psych_eval.get("facial", ""))
             st.write(psych_eval.get("conversation", ""))
             st.markdown(f"**Agent Conclusion:** {psych_eval.get('conclusion', 'N/A')}")
     else:
-        st.info("No psychologist session data found. Complete a session on the main app page and click 'End Session & Evaluate' first.")
+        st.info("No psychologist session data. You can still generate a diagnosis from psychiatric data alone.")
 
     st.markdown("##### ⚕️ Psychiatrist Lab/Scale Report")
-    with st.expander("View Psychiatrist Findings", expanded=False):
-        for line in psych_report_lines:
-            st.caption(line)
+    if has_psychiatric:
+        with st.expander("View Psychiatrist Findings", expanded=False):
+            for line in psych_report_lines:
+                st.caption(line)
+    else:
+        st.info("No psychiatric lab data. You can still generate a diagnosis from the psychological session alone.")
+
+    # Show which sources are active
+    sources = []
+    if has_psychological:
+        sources.append("🧠 Psychological Session")
+    if has_psychiatric:
+        sources.append("⚕️ Psychiatric Lab Data")
+    st.caption(f"**Active data sources:** {' + '.join(sources)}")
 
     st.divider()
 
-    # Generate combined AI summary
+    # ── Generate combined AI summary ─────────────────────────
     if st.button("🧬 Generate Integrated Diagnosis & Recommendations", use_container_width=True):
         try:
             from langchain_groq import ChatGroq
@@ -267,23 +288,49 @@ if patient_data:
 
             llm = ChatGroq(api_key=CFG.GROQ_API_KEY, model_name=CFG.GROQ_MODEL, temperature=0.2)
 
-            system_prompt = (
-                "You are a senior clinical psychiatrist reviewing two reports for the same patient:\n"
-                "1. A PSYCHOLOGIST SESSION REPORT based on a conversational interview and facial expression analysis.\n"
-                "2. A PSYCHIATRIST LAB/SCALE REPORT based on clinical biomarkers and standardized psychiatric scales.\n\n"
-                "Your task:\n"
-                "- Cross-reference findings from both reports.\n"
-                "- Identify the most likely diagnosis or diagnoses the patient is suffering from.\n"
-                "- Explain how the two reports corroborate or contradict each other.\n"
-                "- Provide clear, actionable next steps (therapy type, medication considerations, referrals, lifestyle changes).\n"
-                "- Use professional clinical language but keep it readable.\n"
-                "- Structure your response with clear headings: Integrated Diagnosis, Corroborating Evidence, Recommended Treatment Plan.\n"
-            )
+            # Adapt the system prompt based on which data sources are available
+            if has_psychological and has_psychiatric:
+                system_prompt = (
+                    "You are a senior clinical psychiatrist reviewing two reports for the same patient:\n"
+                    "1. A PSYCHOLOGIST SESSION REPORT based on a conversational interview and facial expression analysis.\n"
+                    "2. A PSYCHIATRIST LAB/SCALE REPORT based on clinical biomarkers and standardized psychiatric scales.\n\n"
+                    "Your task:\n"
+                    "- Cross-reference findings from both reports.\n"
+                    "- Identify the most likely diagnosis or diagnoses.\n"
+                    "- Explain how the two reports corroborate or contradict each other.\n"
+                    "- Provide clear, actionable next steps (therapy type, medication considerations, referrals, lifestyle changes).\n"
+                    "- Use professional clinical language but keep it readable.\n"
+                    "- Structure your response with clear headings: Integrated Diagnosis, Corroborating Evidence, Recommended Treatment Plan.\n"
+                )
+            elif has_psychological:
+                system_prompt = (
+                    "You are a senior clinical psychiatrist reviewing a PSYCHOLOGIST SESSION REPORT for a patient.\n"
+                    "The report is based on a conversational interview and facial expression analysis.\n"
+                    "No psychiatric lab or scale data is available at this time.\n\n"
+                    "Your task:\n"
+                    "- Based solely on the psychological session data, identify the most likely diagnosis or diagnoses.\n"
+                    "- Note any red flags or areas that warrant further psychiatric investigation (lab tests, scales).\n"
+                    "- Provide clear, actionable next steps (therapy type, medication considerations, referrals, lifestyle changes).\n"
+                    "- Use professional clinical language but keep it readable.\n"
+                    "- Structure your response with clear headings: Preliminary Diagnosis, Key Observations, Recommended Next Steps, Suggested Lab Tests.\n"
+                )
+            else:
+                system_prompt = (
+                    "You are a senior clinical psychiatrist reviewing a PSYCHIATRIST LAB/SCALE REPORT for a patient.\n"
+                    "The report is based on clinical biomarkers and standardized psychiatric scales.\n"
+                    "No psychological session data (interview/facial analysis) is available at this time.\n\n"
+                    "Your task:\n"
+                    "- Based solely on the lab/scale data, identify the most likely diagnosis or diagnoses.\n"
+                    "- Note any areas where a psychological interview would help clarify the clinical picture.\n"
+                    "- Provide clear, actionable next steps (therapy type, medication considerations, referrals, lifestyle changes).\n"
+                    "- Use professional clinical language but keep it readable.\n"
+                    "- Structure your response with clear headings: Preliminary Diagnosis, Lab Findings Analysis, Recommended Treatment Plan, Recommended Psychological Assessment.\n"
+                )
 
             user_prompt = (
                 f"=== PSYCHOLOGIST SESSION REPORT ===\n{psychologist_text}\n\n"
                 f"=== PSYCHIATRIST LAB/SCALE REPORT ===\n{psychiatrist_text}\n\n"
-                "Please provide an integrated clinical summary."
+                "Please provide a clinical diagnosis and recommendations."
             )
 
             with st.spinner("🧬 Generating integrated clinical summary..."):
@@ -294,16 +341,14 @@ if patient_data:
 
             st.session_state["integrated_summary"] = response.content
 
-            # ── AUTO-SAVE to database ──────────────────────────
+            # ── AUTO-SAVE to database ────────────────────────
             try:
                 from utils.db import update_report_integrated, update_report_psychiatrist, update_report_severity, get_latest_report_id, save_report
-                import json
 
                 user_id = st.session_state.get("user_id")
                 report_id = st.session_state.get("current_report_id")
 
-                # ── Calculate blended severity: 50% psychological + 50% psychiatric ──
-                # Psychological severity (from fusion engine)
+                # ── Calculate severity based on available data ──
                 psych_severity = 0.0
                 if hasattr(st.session_state, "fusion_engine"):
                     live = st.session_state.fusion_engine.get_state()
@@ -311,31 +356,38 @@ if patient_data:
                 elif "clinical_state" in st.session_state:
                     psych_severity = st.session_state.clinical_state.get("average_severity_score", 0.0)
 
-                # Psychiatric severity (from abnormality ratio)
                 total_params = len(abnormal) + len(normal)
                 psychiatric_severity = len(abnormal) / total_params if total_params > 0 else 0.0
 
-                # Blended: 50% psychological + 50% psychiatric
-                blended_severity = (psych_severity * 0.50) + (psychiatric_severity * 0.50)
+                # Adaptive blending based on available sources
+                if has_psychological and has_psychiatric:
+                    # Both: 50/50
+                    blended_severity = (psych_severity * 0.50) + (psychiatric_severity * 0.50)
+                elif has_psychological:
+                    # Psychological only: 60% facial + 40% text (already in psych_severity)
+                    blended_severity = psych_severity
+                else:
+                    # Psychiatric only
+                    blended_severity = psychiatric_severity
+
                 blended_severity = min(1.0, max(0.0, blended_severity))
 
+                # Prepare psychiatrist data dicts
+                params_dict = {e["param"]: e["value"] for e in abnormal + normal} if has_psychiatric else {}
+                abnormal_list = [{"param": e["param"], "value": e["value"], "disorder": e["disorder"], "solution": e["solution"]} for e in abnormal] if has_psychiatric else []
+
                 if user_id and report_id:
-                    # Update existing report with psychiatrist + integrated data
-                    params_dict = {e["param"]: e["value"] for e in abnormal + normal}
-                    abnormal_list = [{"param": e["param"], "value": e["value"], "disorder": e["disorder"], "solution": e["solution"]} for e in abnormal]
-                    update_report_psychiatrist(report_id, params_dict, abnormal_list)
+                    if has_psychiatric:
+                        update_report_psychiatrist(report_id, params_dict, abnormal_list)
                     update_report_integrated(report_id, response.content)
                     update_report_severity(report_id, blended_severity)
                 elif user_id:
-                    # No existing report — create a new one with psychiatrist data
-                    params_dict = {e["param"]: e["value"] for e in abnormal + normal}
-                    abnormal_list = [{"param": e["param"], "value": e["value"], "disorder": e["disorder"], "solution": e["solution"]} for e in abnormal]
-                    psych_eval = st.session_state.get("evaluation_result", {})
+                    eval_data = st.session_state.get("evaluation_result", {})
                     rid = save_report(
                         user_id=user_id,
-                        psychologist_facial=psych_eval.get("facial", ""),
-                        psychologist_conversation=psych_eval.get("conversation", ""),
-                        psychologist_conclusion=psych_eval.get("conclusion", ""),
+                        psychologist_facial=eval_data.get("facial", ""),
+                        psychologist_conversation=eval_data.get("conversation", ""),
+                        psychologist_conclusion=eval_data.get("conclusion", ""),
                         psychiatrist_params=params_dict,
                         psychiatrist_abnormalities=abnormal_list,
                         integrated_summary=response.content,
@@ -347,7 +399,6 @@ if patient_data:
 
         except Exception as e:
             st.error(f"⚠️ Failed to generate summary: {e}")
-
 
     # Display persisted summary
     if "integrated_summary" in st.session_state:
