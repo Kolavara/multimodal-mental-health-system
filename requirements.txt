@@ -1,0 +1,44 @@
+# =============================================================
+# Multimodal Clinical AI Platform — Dependencies
+# =============================================================
+# Hardware target: RTX 4060 (8GB VRAM) + 16GB RAM
+# Facial/Speech processing runs on CPU.
+# TensorFlow emotion model runs on CPU (tiny model).
+# Only Ollama uses GPU.
+# =============================================================
+
+# --- Core UI ---
+streamlit>=1.30.0
+streamlit-webrtc>=0.47.0
+streamlit-autorefresh>=1.0.0
+
+# --- Local LLM & Orchestration ---
+langchain>=0.3.0
+langchain-groq>=0.2.0
+langchain-ollama>=0.2.0
+langgraph>=0.2.0
+
+# --- Speech-to-Text (CPU) ---
+faster-whisper>=1.0.0
+sounddevice>=0.4.0
+
+# --- Facial Analysis (CPU — MediaPipe + TensorFlow) ---
+mediapipe>=0.10.0
+opencv-python-headless>=4.8.0
+tensorflow>=2.15.0
+
+# --- Text-to-Speech (Real-time voice) ---
+edge-tts>=6.1.0
+
+# --- Neuro Signal Processing (mock) ---
+mne>=1.6.0
+
+# --- Streaming Bus (Redpanda/Kafka client) ---
+confluent-kafka>=2.3.0
+
+# --- Utilities ---
+numpy>=1.24.0
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+scipy>=1.11.0
+imageio-ffmpeg>=0.4.0

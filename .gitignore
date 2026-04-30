@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.streamlit/secrets.toml
+error_log.txt
+*.task
+engines/facial/face_landmarker.task
