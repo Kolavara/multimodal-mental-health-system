@@ -498,3 +498,52 @@ div[data-baseweb="tooltip"] {
 div[data-testid="stAlert"] {
     border-radius: var(--radius-btn) !important;
 }
+
+/* ── Login Form Styling ───────────────────────────────────── */
+div[data-testid="stForm"] {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+}
+
+div[data-testid="stForm"] button[type="submit"] {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-light)) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: var(--radius-btn) !important;
+    font-weight: 700 !important;
+    padding: 0.65rem 1.5rem !important;
+    box-shadow: var(--extruded-small) !important;
+    transition: all 0.2s ease !important;
+    margin-top: 0.75rem !important;
+}
+
+div[data-testid="stForm"] button[type="submit"]:hover {
+    box-shadow: var(--extruded-hover) !important;
+    transform: translateY(-1px) !important;
+}
+
+/* ── Admin Portal — Patient Cards ─────────────────────────── */
+.admin-patient-card {
+    background: var(--bg-base);
+    border-radius: var(--radius-card);
+    padding: 1.5rem;
+    box-shadow: var(--extruded);
+    text-align: center;
+    transition: all 0.25s ease;
+    cursor: pointer;
+}
+
+.admin-patient-card:hover {
+    box-shadow: var(--extruded-hover);
+    transform: translateY(-2px);
+}
+
+/* ── Password Input Eye Icon Fix ──────────────────────────── */
+input[type="password"] {
+    background: var(--bg-base) !important;
+    color: var(--text-primary) !important;
+    box-shadow: var(--inset-small) !important;
+    border: none !important;
+    border-radius: var(--radius-inner) !important;
+}

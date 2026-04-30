@@ -6,3 +6,5 @@ __pycache__/
 error_log.txt
 *.task
 engines/facial/face_landmarker.task
+data/clinical_reports.db
+

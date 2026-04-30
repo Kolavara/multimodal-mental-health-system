@@ -11,6 +11,12 @@ if os.path.exists(css_path):
     with open(css_path, "r") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
+# Auth guard
+if not st.session_state.get("logged_in"):
+    st.warning("🔒 Please log in from the main page first.")
+    st.stop()
+
+
 # ── Constants ─────────────────────────────────────────────────
 NORMAL_RANGES = {
     "Cortisol_AM": (5.0, 25.0),
@@ -288,8 +294,41 @@ if patient_data:
 
             st.session_state["integrated_summary"] = response.content
 
+            # ── AUTO-SAVE to database ──────────────────────────
+            try:
+                from utils.db import update_report_integrated, update_report_psychiatrist, get_latest_report_id, save_report
+                import json
+
+                user_id = st.session_state.get("user_id")
+                report_id = st.session_state.get("current_report_id")
+
+                if user_id and report_id:
+                    # Update existing report with psychiatrist + integrated data
+                    params_dict = {e["param"]: e["value"] for e in abnormal + normal}
+                    abnormal_list = [{"param": e["param"], "value": e["value"], "disorder": e["disorder"], "solution": e["solution"]} for e in abnormal]
+                    update_report_psychiatrist(report_id, params_dict, abnormal_list)
+                    update_report_integrated(report_id, response.content)
+                elif user_id:
+                    # No existing report — create a new one with psychiatrist data
+                    params_dict = {e["param"]: e["value"] for e in abnormal + normal}
+                    abnormal_list = [{"param": e["param"], "value": e["value"], "disorder": e["disorder"], "solution": e["solution"]} for e in abnormal]
+                    psych_eval = st.session_state.get("evaluation_result", {})
+                    rid = save_report(
+                        user_id=user_id,
+                        psychologist_facial=psych_eval.get("facial", ""),
+                        psychologist_conversation=psych_eval.get("conversation", ""),
+                        psychologist_conclusion=psych_eval.get("conclusion", ""),
+                        psychiatrist_params=params_dict,
+                        psychiatrist_abnormalities=abnormal_list,
+                        integrated_summary=response.content,
+                    )
+                    st.session_state["current_report_id"] = rid
+            except Exception as db_err:
+                st.caption(f"⚠️ DB save note: {db_err}")
+
         except Exception as e:
             st.error(f"⚠️ Failed to generate summary: {e}")
+
 
     # Display persisted summary
     if "integrated_summary" in st.session_state:

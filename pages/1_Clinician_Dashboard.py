@@ -8,11 +8,17 @@ if os.path.exists(css_path):
     with open(css_path, "r") as f:
         st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
+# Auth guard
+if not st.session_state.get("logged_in"):
+    st.warning("🔒 Please log in from the main page first.")
+    st.stop()
+
 try:
     from streamlit_autorefresh import st_autorefresh
     st_autorefresh(interval=2000, key="clinician_refresh")
 except ImportError:
     pass
+
 
 st.title("🚨 Clinician Oversight Dashboard")
 
