@@ -20,3 +20,4 @@ class ClinicalState(TypedDict):
     current_agent: str      # "psychologist" or "psychiatrist"
     escalation_reason: str  # Why the handoff occurred
     clinical_summary: str   # Psychologist's notes passed to Psychiatrist
+    previous_history: str   # Patient's past session history

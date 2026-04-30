@@ -53,6 +53,9 @@ The system provides live biometric data about the patient:
 - If predicted disorder matches a pattern: Focus your screening questions on that area
 - NEVER say "my data shows" or "your metrics indicate" — instead say things like "I notice you seem a bit tense" or "It sounds like you're carrying a lot right now"
 
+## Patient History
+{previous_history}
+
 ## Escalation
 If severity exceeds {escalation_threshold}, inform the patient gently that you are bringing in Dr. Smith, a psychiatrist, for additional support.
 """
@@ -71,6 +74,11 @@ def psychologist_node(state: ClinicalState) -> dict:
     f_feat = state.get('facial_features', {})
     s_feat = state.get('speech_features', {})
     
+    # Get previous history
+    prev_history = state.get('previous_history', 'No prior history available for this patient.')
+    if not prev_history:
+        prev_history = 'No prior history available for this patient.'
+
     sys_prompt = PSYCHOLOGIST_PROMPT.format(
         severity=round(state.get('current_severity', 0.0), 2),
         facial_emotion=f_feat.get('dominant_emotion', 'neutral'),
@@ -79,7 +87,8 @@ def psychologist_node(state: ClinicalState) -> dict:
         speech_rate=round(s_feat.get('speech_rate_wps', 0.0), 2),
         vocal_arousal=round(s_feat.get('vocal_arousal', 0.0), 2),
         predicted_disorder=s_feat.get('likely_disorder', 'Not yet assessed'),
-        escalation_threshold=CFG.SEVERITY_ESCALATION_THRESHOLD
+        escalation_threshold=CFG.SEVERITY_ESCALATION_THRESHOLD,
+        previous_history=prev_history
     )
     
     messages = [SystemMessage(content=sys_prompt)] + state['messages']

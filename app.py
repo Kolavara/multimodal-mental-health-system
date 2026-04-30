@@ -253,6 +253,15 @@ if "initialized" not in st.session_state:
         initial_greeting = "Hello. I'm the clinical AI assistant. How are you feeling today? Please tell me a bit about what's been on your mind."
         st.session_state.tts_engine.speak(initial_greeting)
 
+        from utils.db import get_reports_for_user
+        reports = get_reports_for_user(st.session_state.user_id)
+        prev_history = ""
+        if reports:
+            # Gather past integrated summaries
+            summaries = [r.get("integrated_summary") for r in reports if r.get("integrated_summary")]
+            if summaries:
+                prev_history = "\n\n".join(f"Session {len(summaries)-i}: {s}" for i, s in enumerate(summaries[:3])) # Up to last 3 sessions
+
         st.session_state.clinical_state = {
             "messages": [AIMessage(content=initial_greeting)],
             "patient_id": st.session_state.patient_id,
@@ -262,7 +271,8 @@ if "initialized" not in st.session_state:
             "speech_features": {},
             "current_agent": "psychologist",
             "escalation_reason": "",
-            "clinical_summary": ""
+            "clinical_summary": "",
+            "previous_history": prev_history
         }
 
         # Mark initialized LAST so a failure retries on next rerun
