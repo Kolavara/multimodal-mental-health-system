@@ -2,13 +2,17 @@
 
 A state-of-the-art, local-first multimodal clinical AI platform built to assist healthcare professionals in diagnosing and tracking mental health disorders. The platform integrates real-time facial emotion recognition, speech sentiment analysis, and a LangGraph-powered AI conversational agent.
 
+Recently completely re-architected from a Streamlit application into a **high-performance FastAPI Single Page Application (SPA)** using WebSockets for real-time, low-latency telemetry and communication.
+
 ## 🌟 Key Features
 
+*   **Real-Time WebSockets:** Zero-latency streaming of patient telemetry, webcam video, and chat communications via FastAPI WebSockets.
 *   **Multimodal Feature Fusion:** Real-time blending of visual (facial expressions) and auditory (speech sentiment) distress signals to calculate a dynamic patient severity score.
-*   **Role-Based Access Control:** Secure authentication system with tailored views for patients, clinicians, and administrators.
+*   **Role-Based Access Control (RBAC):** Secure JWT-based authentication system with tailored UI masking for patients, clinicians, and administrators.
 *   **AI Psychologist Agent:** A conversational agent that conducts interactive therapy sessions, tracks patient state, and synthesizes clinical notes.
 *   **Integrated Psychiatric Reports:** Blends conversational findings with simulated clinical biomarkers (e.g., Cortisol, Serotonin) to generate a comprehensive diagnostic summary.
-*   **Longitudinal Tracking:** Persistent patient history with interactive "Risk Level Trend" visualization to track progress over multiple sessions.
+*   **Longitudinal Tracking:** Persistent patient history with interactive **Chart.js** "Risk Level Trend" visualization to track progress over multiple sessions.
+*   **Dark Neumorphic UI:** A sleek, premium Dark Neumorphic aesthetic with an integrated Light/Dark mode toggle.
 *   **Local-First Architecture:** Designed to run sensitive inferencing locally on hardware, ensuring data privacy and low latency.
 
 ---
@@ -31,7 +35,7 @@ Generates a formal medical evaluation combining the AI Psychologist's conversati
 ![Psychiatrist Report](assets/images/psychiatrist_report_1777518617983.png)
 
 ### 4. Patient History & Trend Analysis
-A dedicated portal for patients to review their past sessions. Includes an interactive Altair chart mapping their longitudinal Risk Level (%) against session progression.
+A dedicated portal for patients to review their past sessions. Includes an interactive line chart mapping their longitudinal Risk Level (%) against session progression.
 
 ![Previous Reports](assets/images/previous_reports_1777518632160.png)
 
@@ -44,30 +48,41 @@ A high-level dashboard for hospital administrators or head clinicians to monitor
 
 ## 🛠️ Technology Stack
 
-*   **Frontend UI:** Streamlit with custom CSS (Neumorphism aesthetic).
-*   **Charting:** Altair (Declarative statistical visualization).
-*   **AI Agent Orchestration:** LangChain & LangGraph.
-*   **Facial Recognition:** MediaPipe + custom TensorFlow Keras Emotion Classifier.
-*   **Speech Processing:** Whisper (faster-whisper) + edge-tts.
-*   **Database:** SQLite (local persistence).
-*   **Data Streaming:** Python Dataclasses and internal state management.
+*   **Backend System:** FastAPI + Uvicorn (Asynchronous Python framework)
+*   **Communication Layer:** WebSockets for bidirectional real-time event streaming
+*   **Frontend UI:** Vanilla HTML5, JavaScript, and CSS3 (Zero heavy frontend frameworks)
+*   **Charting & Visualization:** Chart.js
+*   **AI Agent Orchestration:** LangChain & LangGraph via Groq API
+*   **Facial Recognition:** MediaPipe + custom TensorFlow Keras Emotion Classifier
+*   **Speech Processing:** Whisper (faster-whisper) + edge-tts
+*   **Database:** SQLite (local persistence)
+*   **Authentication:** PyJWT (JSON Web Tokens)
+
+---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 *   Python 3.10+
+*   Node.js (optional, for frontend dev tools if added later)
 *   Dependencies listed in `requirements.txt`
 
 ### Installation
 1. Clone the repository.
-2. Install the requirements:
+2. Install the Python requirements:
    ```bash
    pip install -r requirements.txt
    ```
-3. Set up your `.env` file (see `config.py` for required variables, e.g., `GROQ_API_KEY`).
+3. Set up your `.env` file (see `config.py` for required variables). **Required keys include:**
+   - `JWT_SECRET`
+   - `GROQ_API_KEY`
 
 ### Running the App
-Start the Streamlit development server:
+Start the FastAPI server via Uvicorn:
 ```bash
-streamlit run app.py
+python server.py
 ```
+*(Alternatively: `uvicorn server:app --host 0.0.0.0 --port 8000 --reload`)*
+
+Once the server is running, open your browser and navigate to:
+**http://localhost:8000**
