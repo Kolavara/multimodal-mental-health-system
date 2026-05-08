@@ -89,6 +89,15 @@ class SpeechAnalysisEngine:
         # Init Groq LLM for text analysis
         self.llm = ChatGroq(api_key=CFG.GROQ_API_KEY, model_name=CFG.GROQ_MODEL, temperature=0.0)
 
+    def warmup(self):
+        """Pre-load Whisper model with a tiny dummy transcription to avoid cold-start latency."""
+        try:
+            dummy = np.zeros(16000, dtype=np.float32)  # 1 second of silence
+            _ = self.model.transcribe(dummy, beam_size=1, language="en")
+            self.logger.info("[SPEECH] Whisper model warmed up.")
+        except Exception as e:
+            self.logger.warning(f"[SPEECH] Warmup failed (non-critical): {e}")
+
     @property
     def model(self):
         """Lazy-load WhisperModel only when transcription is actually needed."""
@@ -183,10 +192,187 @@ class SpeechAnalysisEngine:
         duration = len(audio_data) / rate
         return (len(zero_crossings) / 2) / duration
 
+    def _extract_advanced_prosody(self, audio_data: np.ndarray) -> dict:
+        """
+        Extract research-informed prosodic features from audio.
+        Based on Menne et al. (2024) BMC Psychiatry — "The voice of depression".
+        Key biomarkers: pitch slope, pitch variability, jitter, shimmer, 
+        speech rate, pause patterns, loudness variation.
+        """
+        sr = CFG.AUDIO_SAMPLE_RATE
+        duration = len(audio_data) / sr
+        if duration < 0.5:
+            return {}
+
+        # --- Pitch trajectory (F0) analysis ---
+        # Compute pitch over sliding windows (50ms, 25ms hop)
+        win_size = int(0.05 * sr)
+        hop_size = int(0.025 * sr)
+        pitches = []
+        for i in range(0, len(audio_data) - win_size, hop_size):
+            window = audio_data[i:i + win_size]
+            if np.abs(window).mean() < 0.005:
+                continue
+            zc = np.where(np.diff(np.sign(window)))[0]
+            if len(zc) >= 2:
+                f0 = (len(zc) / 2) / (win_size / sr)
+                if 50 < f0 < 500:  # Plausible human voice range
+                    pitches.append(f0)
+
+        if len(pitches) < 3:
+            return {'pitch_mean': 0, 'pitch_std': 0, 'pitch_slope': 0,
+                    'jitter_local': 0, 'shimmer_local': 0, 'pause_rate': 0,
+                    'speech_rate_wps': 0, 'loudness_std': 0, 'pitch_range': 0}
+
+        pitches_arr = np.array(pitches)
+        pitch_mean = float(np.mean(pitches_arr))
+        pitch_std = float(np.std(pitches_arr))
+        pitch_range = float(np.max(pitches_arr) - np.min(pitches_arr))
+
+        # Pitch slope (linear regression) — key MDD biomarker (Menne: η²=0.31)
+        x = np.arange(len(pitches_arr))
+        if len(x) > 1:
+            slope = float(np.polyfit(x, pitches_arr, 1)[0])
+        else:
+            slope = 0.0
+
+        # --- Jitter (F0 perturbation) — voice instability ---
+        # Local jitter: average absolute difference between consecutive periods
+        periods = 1.0 / pitches_arr
+        period_diffs = np.abs(np.diff(periods))
+        jitter_local = float(np.mean(period_diffs) / np.mean(periods)) if len(periods) > 1 else 0.0
+
+        # --- Shimmer proxy (amplitude perturbation) ---
+        # Compute RMS amplitude per window
+        amplitudes = []
+        for i in range(0, len(audio_data) - win_size, hop_size):
+            window = audio_data[i:i + win_size]
+            rms = float(np.sqrt(np.mean(window ** 2)))
+            if rms > 0.001:
+                amplitudes.append(rms)
+
+        if len(amplitudes) > 1:
+            amp_arr = np.array(amplitudes)
+            amp_diffs = np.abs(np.diff(amp_arr))
+            shimmer_local = float(np.mean(amp_diffs) / np.mean(amp_arr))
+            loudness_std = float(np.std(amp_arr))
+        else:
+            shimmer_local = 0.0
+            loudness_std = 0.0
+
+        # --- Pause analysis ---
+        # Identify voiced/unvoiced segments
+        frame_energy = []
+        for i in range(0, len(audio_data) - win_size, hop_size):
+            frame_energy.append(np.abs(audio_data[i:i + win_size]).mean())
+        
+        threshold = max(np.mean(frame_energy) * 0.3, 0.003)
+        is_voiced = [e > threshold for e in frame_energy]
+        
+        # Count pause segments (consecutive unvoiced frames)
+        pauses = 0
+        in_pause = False
+        pause_durations = []
+        current_pause_len = 0
+        for v in is_voiced:
+            if not v:
+                if not in_pause:
+                    in_pause = True
+                    current_pause_len = 0
+                current_pause_len += 1
+            else:
+                if in_pause:
+                    pause_dur = current_pause_len * (hop_size / sr)
+                    if pause_dur > 0.15:  # Only count pauses > 150ms
+                        pauses += 1
+                        pause_durations.append(pause_dur)
+                    in_pause = False
+
+        voiced_frames = sum(is_voiced)
+        total_frames = len(is_voiced)
+        pause_rate = 1.0 - (voiced_frames / total_frames) if total_frames > 0 else 0.0
+
+        return {
+            'pitch_mean': pitch_mean,
+            'pitch_std': pitch_std,
+            'pitch_slope': slope,
+            'pitch_range': pitch_range,
+            'jitter_local': jitter_local,
+            'shimmer_local': shimmer_local,
+            'pause_rate': pause_rate,
+            'pause_count': pauses,
+            'mean_pause_duration': float(np.mean(pause_durations)) if pause_durations else 0.0,
+            'loudness_std': loudness_std,
+            'speech_rate_wps': 0.0,  # Will be filled by transcription
+        }
+
+    def _compute_speech_distress(self, prosody: dict) -> float:
+        """
+        Compute a speech-characteristics distress score (0-1) from prosodic features.
+        Informed by Menne et al. (2024): pitch slope flatness, low pitch variability,
+        high jitter/shimmer, slow speech rate, and high pause rate are depression indicators.
+        """
+        distress = 0.0
+        weight_total = 0.0
+
+        # 1. Pitch variability (low std = flat/monotone = depressive, η²=0.13)
+        pitch_std = prosody.get('pitch_std', 0)
+        if pitch_std > 0:
+            # Normal range ~20-60 Hz std; below 15 is concerning
+            pitch_var_distress = max(0, min(1, (40 - pitch_std) / 40))
+            distress += pitch_var_distress * 0.20
+            weight_total += 0.20
+
+        # 2. Pitch slope flatness (near-zero slope = depressive, η²=0.31)
+        pitch_slope = abs(prosody.get('pitch_slope', 0))
+        slope_distress = max(0, min(1, (0.5 - pitch_slope) / 0.5))
+        distress += slope_distress * 0.15
+        weight_total += 0.15
+
+        # 3. Jitter (voice instability, correlated with BDI-II r>0.51)
+        jitter = prosody.get('jitter_local', 0)
+        # Normal jitter < 0.01; high jitter > 0.03 is clinical
+        jitter_distress = max(0, min(1, jitter / 0.05))
+        distress += jitter_distress * 0.15
+        weight_total += 0.15
+
+        # 4. Shimmer (amplitude perturbation, r>0.40)
+        shimmer = prosody.get('shimmer_local', 0)
+        shimmer_distress = max(0, min(1, shimmer / 0.15))
+        distress += shimmer_distress * 0.15
+        weight_total += 0.15
+
+        # 5. Pause rate (high pause rate with long pauses = psychomotor retardation)
+        pause_rate = prosody.get('pause_rate', 0)
+        mean_pause = prosody.get('mean_pause_duration', 0)
+        pause_distress = max(0, min(1, (pause_rate * 0.6 + min(1, mean_pause / 3.0) * 0.4)))
+        distress += pause_distress * 0.15
+        weight_total += 0.15
+
+        # 6. Speech rate (slow speech = depressive, η² moderate)
+        wps = prosody.get('speech_rate_wps', 0)
+        if wps > 0:
+            # Normal ~2-4 wps; below 1.5 is slow
+            rate_distress = max(0, min(1, (2.5 - wps) / 2.5))
+            distress += rate_distress * 0.10
+            weight_total += 0.10
+
+        # 7. Loudness variation (low = flat affect)
+        loudness_std = prosody.get('loudness_std', 0)
+        if loudness_std > 0:
+            loud_distress = max(0, min(1, (0.05 - loudness_std) / 0.05))
+            distress += loud_distress * 0.10
+            weight_total += 0.10
+
+        if weight_total > 0:
+            distress = distress / weight_total
+
+        return max(0.0, min(1.0, distress))
+
     def _derive_vocal_emotion(self, pitch: float, wps: float) -> tuple[float, float]:
         """
         Estimate emotional valence/arousal from prosody.
-        This is a heuristic proxy for the MVP.
+        Enhanced with insights from Menne et al. (2024).
         """
         arousal = 0.5
         valence = 0.0
@@ -201,13 +387,125 @@ class SpeechAnalysisEngine:
             arousal = 0.2
             valence = -0.7
             
-        # Monotone (low pitch variance)
+        # Monotone (low pitch variance) — key depression indicator
         if len(self.pitch_history) > 10:
             pitch_std = np.std(self.pitch_history)
             if pitch_std < 10: # Flat affect
                 valence -= 0.3
                 
         return max(-1.0, min(1.0, valence)), max(0.0, min(1.0, arousal))
+
+    def process_browser_audio(self, audio_bytes: bytes) -> dict:
+        """
+        Process audio from browser MediaRecorder (WebM/Opus format).
+        Converts to WAV, extracts prosodic features, transcribes with Whisper.
+        Returns transcript + full prosody analysis for tri-modal fusion.
+        """
+        import subprocess
+        from scipy.io import wavfile
+        
+        start_t = time.time()
+        self.logger.info(f"[VOICE] Processing {len(audio_bytes)} bytes of browser audio")
+
+        try:
+            # Step 1: Save raw browser audio (WebM/Opus)
+            tmp_dir = tempfile.gettempdir()
+            temp_input = os.path.join(tmp_dir, "clinical_voice_input.webm")
+            temp_output = os.path.join(tmp_dir, "clinical_voice_output.wav")
+            with open(temp_input, "wb") as f:
+                f.write(audio_bytes)
+
+            # Step 2: Convert WebM → 16kHz mono WAV using ffmpeg
+            import imageio_ffmpeg
+            ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+            result = subprocess.run([
+                ffmpeg_path, "-y",
+                "-i", temp_input,
+                "-ar", "16000",
+                "-ac", "1",
+                "-f", "wav",
+                temp_output
+            ], capture_output=True, timeout=15)
+
+            if result.returncode != 0:
+                self.logger.error(f"FFmpeg failed: {result.stderr.decode()}")
+                return {"transcript": "", "prosody": {}, "speech_distress": 0.0}
+
+            # Step 3: Read WAV
+            sample_rate, data = wavfile.read(temp_output)
+            data = data.astype(np.float32) / 32768.0  # int16 → float32 [-1, 1]
+            duration = len(data) / sample_rate
+            self.logger.info(f"[VOICE] WAV: {sample_rate}Hz, {len(data)} samples, {duration:.1f}s")
+
+            # Step 4: Extract advanced prosodic features (research-informed)
+            prosody = self._extract_advanced_prosody(data)
+
+            # Step 5: Whisper transcription
+            transcript = ""
+            self.logger.info("[VOICE] Starting Whisper transcription...")
+            segments, info = self.model.transcribe(
+                data, beam_size=1, language="en",
+                condition_on_previous_text=False
+            )
+            texts = []
+            word_count = 0
+            for segment in segments:
+                texts.append(segment.text)
+                word_count += len(segment.text.split())
+            transcript = " ".join(texts).strip()
+
+            # Update speech rate from actual word count
+            if duration > 0 and word_count > 0:
+                prosody['speech_rate_wps'] = word_count / duration
+
+            # Step 6: Compute composite speech distress score
+            speech_distress = self._compute_speech_distress(prosody)
+
+            elapsed = time.time() - start_t
+            self.logger.info(f"[VOICE] Transcript: '{transcript}' | Distress: {speech_distress:.2f} | {elapsed:.1f}s")
+
+            # Update internal state
+            if transcript:
+                self._classify_text_async(transcript)
+                self.transcript_history.append({
+                    'timestamp': time.time(),
+                    'text': transcript
+                })
+
+            # Store prosody in latest_speech_data for fusion engine
+            self.latest_speech_data.update({
+                'timestamp': time.time(),
+                'transcript': transcript,
+                'pitch_hz': prosody.get('pitch_mean', 0),
+                'pitch_std': prosody.get('pitch_std', 0),
+                'pitch_slope': prosody.get('pitch_slope', 0),
+                'jitter_local': prosody.get('jitter_local', 0),
+                'shimmer_local': prosody.get('shimmer_local', 0),
+                'speech_rate_wps': prosody.get('speech_rate_wps', 0),
+                'pause_rate': prosody.get('pause_rate', 0),
+                'loudness_std': prosody.get('loudness_std', 0),
+                'vocal_valence': self._derive_vocal_emotion(
+                    prosody.get('pitch_mean', 0), prosody.get('speech_rate_wps', 0)
+                )[0],
+                'vocal_arousal': self._derive_vocal_emotion(
+                    prosody.get('pitch_mean', 0), prosody.get('speech_rate_wps', 0)
+                )[1],
+                'speech_distress': speech_distress,
+                'has_prosody': True,
+                'processing_time_ms': round(elapsed * 1000, 2)
+            })
+
+            return {
+                "transcript": transcript,
+                "prosody": prosody,
+                "speech_distress": speech_distress,
+            }
+
+        except Exception as e:
+            self.logger.error(f"[VOICE] Error processing browser audio: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"transcript": "", "prosody": {}, "speech_distress": 0.0}
 
     def get_clinical_summary(self) -> str:
         """Return a summarized clinical view of the conversation analysis."""
@@ -230,6 +528,39 @@ class SpeechAnalysisEngine:
             f"Content distress is {distress_label} ({distress:.2f}). "
             f"Predicted disorder: {disorder}. "
             f"Recent excerpt: '{recent_text[-120:]}'"
+        )
+
+    def get_prosody_summary(self) -> str:
+        """Return a summarized clinical view of the speech prosody (vocal) analysis."""
+        if not self.latest_speech_data.get('has_prosody', False):
+            return "No prosodic (voice) data captured. Analysis limited to text content."
+
+        sd = self.latest_speech_data
+        distress = sd.get('speech_distress', 0.0)
+        pitch = sd.get('pitch_hz', 0)
+        rate = sd.get('speech_rate_wps', 0)
+        pause = sd.get('pause_rate', 0)
+        jitter = sd.get('jitter_local', 0)
+
+        distress_label = (
+            "high" if distress > 0.6 else
+            "moderate" if distress > 0.3 else
+            "low"
+        )
+
+        # Research-informed interpretations
+        findings = []
+        if pitch > 0 and pitch < 110: findings.append("lowered baseline pitch")
+        if sd.get('pitch_std', 0) < 15: findings.append("flat/monotone affect")
+        if rate > 0 and rate < 1.8: findings.append("slowed speech rate (bradyphasia)")
+        if pause > 0.4: findings.append("frequent long pauses")
+        if jitter > 0.03: findings.append("vocal instability (high jitter)")
+
+        findings_str = f" Findings: {', '.join(findings)}." if findings else " No major vocal abnormalities detected."
+
+        return (
+            f"Speech Analysis (Prosodic): Vocal distress is {distress_label} ({distress:.2f})."
+            f"{findings_str} Pitch: {pitch:.0f}Hz, Rate: {rate:.1f} wps, Pauses: {pause:.0%}"
         )
         
     # --- Live Microphone Capture Methods ---

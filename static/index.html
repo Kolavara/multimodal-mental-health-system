@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Multimodal Clinical AI Platform — Psychologist">
     <title>🧠 Psychologist — Clinical AI</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 </head>
 <body>
@@ -82,7 +82,6 @@
         </div>
 
         <a class="nav-item active" data-page="psychologist" onclick="navigate('psychologist')">🧠 Psychologist</a>
-        <a class="nav-item" data-page="clinician" onclick="navigate('clinician')">🚨 Clinician Dashboard</a>
         <a class="nav-item" data-page="psychiatrist" onclick="navigate('psychiatrist')">⚕️ Psychiatrist Report</a>
         <a class="nav-item" data-page="reports" onclick="navigate('reports')">📂 Previous Reports</a>
         <a class="nav-item" data-page="admin" onclick="navigate('admin')">🔑 Admin Portal</a>
@@ -91,7 +90,8 @@
         <div id="patient-controls">
             <div class="sidebar-section mt-3">Session Duration</div>
             <div class="timer" id="session-timer">00:00:00</div>
-            <button class="btn btn-danger btn-full mt-2" onclick="endSession()">📋 End Session</button>
+            <button class="btn btn-full mt-2" id="start-session-btn" onclick="startSession()" style="background:var(--accent-success);color:#fff;">▶ Start Session</button>
+            <button class="btn btn-danger btn-full mt-2 hidden" id="end-session-sidebar-btn" onclick="endSession()">📋 End Session</button>
             <div class="kill-switch mt-3">
                 <button class="btn btn-danger" id="kill-switch-btn" onclick="emergencyHalt()">🔴 Emergency Override (Kill Switch)</button>
             </div>
@@ -164,6 +164,7 @@
                             <div class="chat-messages" id="chat-messages"></div>
                             <div class="chat-input-area">
                                 <input type="text" id="chat-input" class="input-field" placeholder="Type your response..." onkeydown="if(event.key==='Enter')sendChat()">
+                                <button class="btn mic-btn" id="mic-btn" onclick="toggleMic()" title="Hold to record voice">🎤</button>
                                 <button class="btn" onclick="sendChat()">➤</button>
                             </div>
                             <div style="padding:0.75rem 1rem;border-top:1px solid rgba(163,177,198,0.2);">
@@ -181,38 +182,6 @@
             </div>
         </div>
 
-        <!-- CLINICIAN PAGE ─────────────────────────────────────── -->
-        <div id="page-clinician" class="page">
-            <h1>🚨 Clinician Oversight Dashboard</h1>
-            <div class="grid-left mt-3">
-                <div>
-                    <div class="neu-card">
-                        <p class="section-header">📊 Live Patient Telemetry</p>
-                        <div class="metric-card mb-2">
-                            <div class="metric-label">Global Severity Score</div>
-                            <div class="metric-value" id="clin-severity">0.00 / 1.0</div>
-                        </div>
-                        <div class="progress-bar mb-3"><div class="progress-fill" id="clin-severity-bar" style="width:0%"></div></div>
-                        <h4>Feature Breakdown</h4>
-                        <div class="grid-4 mt-2">
-                            <div class="metric-card"><div class="metric-label">Emotion</div><div class="metric-value" id="clin-emotion">—</div></div>
-                            <div class="metric-card"><div class="metric-label">Facial Valence</div><div class="metric-value" id="clin-valence">0.00</div></div>
-                            <div class="metric-card"><div class="metric-label">Eye Contact</div><div class="metric-value" id="clin-eye">0%</div></div>
-                            <div class="metric-card"><div class="metric-label">Head Velocity</div><div class="metric-value" id="clin-head">0.0</div></div>
-                        </div>
-                    </div>
-                </div>
-                <div>
-                    <div class="neu-card" id="clin-safety">
-                        <p class="section-header">🛡️ Safety Controls</p>
-                        <div id="clin-safety-content">
-                            <div class="alert alert-success">✅ System Operating Normally</div>
-                            <button class="btn btn-danger btn-full" onclick="emergencyHalt()">🛑 EMERGENCY STOP</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
 
         <!-- PSYCHIATRIST PAGE ──────────────────────────────────── -->
         <div id="page-psychiatrist" class="page">
@@ -278,6 +247,6 @@
     </main>
 </div>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=2"></script>
 </body>
 </html>

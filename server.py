@@ -38,6 +38,53 @@ JWT_SECRET = os.getenv("JWT_SECRET", "clinical-ai-secret-key-change-me")
 JWT_ALGORITHM = "HS256"
 
 # ══════════════════════════════════════════════════════════════
+# SERVER-LEVEL MODEL PRE-LOADING (runs once at startup)
+# ══════════════════════════════════════════════════════════════
+
+_preloaded = False
+_cached_graph = None
+
+def _preload_models():
+    """Pre-load all heavy ML models at server startup so sessions start instantly."""
+    global _preloaded, _cached_graph
+    if _preloaded:
+        return
+    logger.info("⏳ Pre-loading ML models at server startup...")
+    t0 = time.time()
+
+    # 1. Emotion classifier (TensorFlow Keras model)
+    try:
+        from engines.facial.emotion_classifier import get_emotion_classifier
+        get_emotion_classifier()
+        logger.info("  ✅ Emotion classifier loaded")
+    except Exception as e:
+        logger.warning(f"  ⚠️ Emotion classifier pre-load failed: {e}")
+
+    # 2. Whisper model (faster-whisper)
+    try:
+        from engines.speech.speech_engine import _get_cached_whisper_model
+        _get_cached_whisper_model()
+        logger.info("  ✅ Whisper model loaded")
+    except Exception as e:
+        logger.warning(f"  ⚠️ Whisper pre-load failed: {e}")
+
+    # 3. Clinical agent graph (LangGraph compilation)
+    try:
+        from agents.graph import build_clinical_graph
+        _cached_graph = build_clinical_graph()
+        logger.info("  ✅ Clinical graph compiled")
+    except Exception as e:
+        logger.warning(f"  ⚠️ Graph pre-load failed: {e}")
+
+    elapsed = time.time() - t0
+    logger.info(f"🚀 All models pre-loaded in {elapsed:.1f}s — sessions will start fast!")
+    _preloaded = True
+
+# Run preload in a background thread so server starts serving immediately
+threading.Thread(target=_preload_models, daemon=True).start()
+
+
+# ══════════════════════════════════════════════════════════════
 # SESSION MANAGEMENT
 # ══════════════════════════════════════════════════════════════
 
@@ -58,26 +105,33 @@ class Session:
         self._lock = threading.Lock()
 
     def initialize(self):
-        """Heavy init — run in a thread."""
+        """Heavy init — run in a thread. Uses pre-loaded models where possible."""
+        global _cached_graph
         from concurrent.futures import ThreadPoolExecutor
         from engines.facial.facial_engine import FacialAnalysisEngine
         from engines.speech.speech_engine import SpeechAnalysisEngine
         from utils.feature_fusion import FeatureFusionEngine
         from engines.tts.tts_engine import TTSEngine
-        from agents.graph import build_clinical_graph
         from utils.safety_engine import safety_monitor
 
         pid, sid = self.patient_id, self.session_id
 
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        # Engines still need per-session state, but models inside are now cached singletons
+        with ThreadPoolExecutor(max_workers=2) as pool:
             f1 = pool.submit(FacialAnalysisEngine, pid, sid)
             f2 = pool.submit(SpeechAnalysisEngine, pid, sid)
-            f3 = pool.submit(build_clinical_graph)
             self.facial_engine = f1.result()
             self.speech_engine = f2.result()
-            self.agent_workflow = f3.result()
+
+        # Reuse pre-compiled graph or build fresh
+        if _cached_graph is not None:
+            self.agent_workflow = _cached_graph
+        else:
+            from agents.graph import build_clinical_graph
+            self.agent_workflow = build_clinical_graph()
 
         self.speech_engine.start_processing_thread()
+        self.speech_engine.warmup()  # Near-instant since model is already cached
         self.fusion_engine = FeatureFusionEngine()
         self.tts_engine = TTSEngine()
         self.tts_engine.start()
@@ -91,9 +145,16 @@ class Session:
         reports = _gru(self.user["id"])
         prev_history = ""
         if reports:
-            summaries = [r.get("integrated_summary") for r in reports if r.get("integrated_summary")]
-            if summaries:
-                prev_history = "\n\n".join(f"Session {len(summaries)-i}: {s}" for i, s in enumerate(summaries[:3]))
+            recent = sorted(reports, key=lambda r: r.get("id", 0), reverse=True)[:3]
+            history_blocks = []
+            for r in reversed(recent):
+                date_str = r.get("timestamp", "").replace("T", " ")[:16]
+                conclusion = r.get("psychologist_conclusion", "No session notes.")
+                integration = r.get("integrated_summary", "No clinical summary.")
+                history_blocks.append(f"### Session on {date_str}\n**Session Notes:** {conclusion}\n**Clinical Diagnosis:** {integration}")
+            
+            if history_blocks:
+                prev_history = "\n\n".join(history_blocks)
 
         self.clinical_state = {
             "messages": [AIMessage(content=greeting)],
@@ -111,6 +172,7 @@ class Session:
 
 
 sessions: dict[str, Session] = {}  # token -> Session
+
 
 
 # ══════════════════════════════════════════════════════════════
@@ -335,6 +397,7 @@ async def integrate_diagnosis(data: dict, user: dict = Depends(get_current_user)
             report_id = save_report(
                 user_id=user["user_id"],
                 psychologist_facial=eval_data.get("facial", ""),
+                psychologist_speech=eval_data.get("speech", ""),
                 psychologist_conversation=eval_data.get("conversation", ""),
                 psychologist_conclusion=eval_data.get("conclusion", ""),
                 psychiatrist_params=params_dict,
@@ -383,6 +446,13 @@ async def ws_session(ws: WebSocket, token: str = ""):
             await ws.send_json({"type": "error", "message": f"Init failed: {e}"})
             await ws.close()
             return
+    else:
+        # Session already initialized (reconnection) — resend greeting + TTS
+        await ws.send_json({"type": "init_complete"})
+        greeting = session.clinical_state["messages"][0].content
+        await ws.send_json({"type": "chat_response", "message": greeting, "agent": "psychologist"})
+        if session.tts_engine:
+            session.tts_engine.speak(greeting)
 
     # Telemetry push task
     async def push_telemetry():
@@ -477,9 +547,82 @@ async def ws_session(ws: WebSocket, token: str = ""):
                     logger.error(f"Chat error: {e}", exc_info=True)
                     await ws.send_json({"type": "error", "message": f"Agent error: {e}"})
 
+            elif msg_type == "voice":
+                # Process voice recording: decode → prosody analysis → transcribe → AI agent
+                try:
+                    from langchain_core.messages import HumanMessage
+                    audio_b64 = msg.get("data", "")
+                    audio_bytes = base64.b64decode(audio_b64)
+                    logger.info(f"[VOICE] Received {len(audio_bytes)} bytes of audio")
+
+                    # Run prosody extraction + Whisper transcription in thread
+                    voice_result = await asyncio.to_thread(
+                        session.speech_engine.process_browser_audio, audio_bytes
+                    )
+
+                    transcript = voice_result.get("transcript", "").strip()
+                    prosody = voice_result.get("prosody", {})
+                    speech_distress = voice_result.get("speech_distress", 0.0)
+
+                    if not transcript:
+                        await ws.send_json({
+                            "type": "voice_result",
+                            "transcript": "",
+                            "prosody": prosody,
+                            "speech_distress": speech_distress,
+                            "error": "Could not transcribe audio. Please try again."
+                        })
+                        continue
+
+                    # Send transcription result back to client immediately
+                    await ws.send_json({
+                        "type": "voice_result",
+                        "transcript": transcript,
+                        "prosody": prosody,
+                        "speech_distress": speech_distress,
+                    })
+
+                    # Update fusion engine with speech data (has_prosody=True triggers tri-modal)
+                    if session.fusion_engine:
+                        session.fusion_engine.update_speech(session.speech_engine.latest_speech_data)
+                        session.fusion_engine.record_chat_snapshot()
+
+                    # Forward transcript through the AI agent (same as chat)
+                    state = session.clinical_state
+                    state["speech_features"] = session.speech_engine.latest_speech_data
+                    live = session.fusion_engine.get_state() if session.fusion_engine else {}
+                    state["current_severity"] = live.get("severity_score", 0.0)
+                    state["average_severity_score"] = live.get("average_severity_score", 0.0)
+                    state["likely_disorder"] = live.get("likely_disorder", "Unknown")
+
+                    state["messages"].append(HumanMessage(content=transcript))
+
+                    if session.tts_engine:
+                        session.tts_engine.stop_current_speech()
+
+                    new_state = await asyncio.to_thread(session.agent_workflow.invoke, state)
+                    for k, v in new_state.items():
+                        state[k] = v
+
+                    ai_msg = state["messages"][-1]
+                    if ai_msg.type == "ai":
+                        if session.tts_engine:
+                            session.tts_engine.speak(ai_msg.content)
+                        await ws.send_json({
+                            "type": "chat_response",
+                            "message": ai_msg.content,
+                            "agent": state.get("current_agent", "psychologist"),
+                        })
+                except Exception as e:
+                    logger.error(f"Voice error: {e}", exc_info=True)
+                    await ws.send_json({"type": "error", "message": f"Voice processing error: {e}"})
+
             elif msg_type == "end_session":
                 try:
                     from langchain_core.messages import HumanMessage
+                    from langchain_groq import ChatGroq
+                    from langchain_core.messages import SystemMessage as SysMsg
+
                     if session.tts_engine:
                         session.tts_engine.stop_current_speech()
 
@@ -498,14 +641,63 @@ async def ws_session(ws: WebSocket, token: str = ""):
                     conclusion = final["messages"][-1].content
                     facial_summary = session.facial_engine.get_clinical_summary() if session.facial_engine else ""
                     convo_summary = session.speech_engine.get_clinical_summary() if session.speech_engine else ""
+                    speech_summary = session.speech_engine.get_prosody_summary() if session.speech_engine else ""
+
+                    # ── Generate multimodal clinical analysis ──
+                    session_summary = ""
+                    try:
+                        summary_llm = ChatGroq(api_key=CFG.GROQ_API_KEY, model_name=CFG.GROQ_MODEL, temperature=0.3)
+                        summary_sys = (
+                            "You are a senior clinical psychologist. You have just finished a patient session where "
+                            "THREE independent analysis modalities were running simultaneously:\n"
+                            "1. FACIAL analysis (emotion, microexpressions, eye contact, affect)\n"
+                            "2. SPEECH/PROSODY analysis (pitch, jitter, pauses, vocal distress)\n"
+                            "3. CONVERSATION analysis (content distress, linguistic markers)\n\n"
+                            "Cross-reference all three modalities and produce a structured clinical analysis with these sections:\n\n"
+                            "**Multimodal Diagnosis:** State the most likely disorder(s) based on converging evidence "
+                            "from all three modalities. Explain which signals from each modality corroborate the diagnosis.\n\n"
+                            "**Key Evidence:** Highlight the 2-3 most clinically significant findings across all modalities "
+                            "(e.g., 'flat vocal affect combined with persistent sadness in conversation content and reduced eye contact').\n\n"
+                            "**Risk Assessment:** State the severity level and any immediate safety concerns.\n\n"
+                            "**Recommended Next Steps:** Provide 3-4 concrete, actionable recommendations "
+                            "(e.g., referral type, suggested assessments, therapeutic approaches, safety planning if needed).\n\n"
+                            "Write in professional clinical language. Use markdown bold (**text**) for section headers. "
+                            "Keep the total response under 250 words."
+                        )
+                        summary_input = (
+                            f"=== FACIAL ANALYSIS ===\n{facial_summary}\n\n"
+                            f"=== SPEECH/PROSODY ANALYSIS ===\n{speech_summary}\n\n"
+                            f"=== CONVERSATION ANALYSIS ===\n{convo_summary}\n\n"
+                            f"=== AI AGENT SESSION NOTES ===\n{conclusion}\n\n"
+                            f"=== COMPUTED METRICS ===\n"
+                            f"Tri-modal severity score: {avg_sev:.1%}\n"
+                            f"Predicted disorder (algorithmic): {disorder}"
+                        )
+                        summary_resp = await asyncio.to_thread(
+                            summary_llm.invoke,
+                            [SysMsg(content=summary_sys), HumanMessage(content=summary_input)]
+                        )
+                        session_summary = summary_resp.content
+                    except Exception as e:
+                        logger.warning(f"Session summary generation failed (non-critical): {e}")
+                        session_summary = (
+                            f"**Multimodal Diagnosis:** {disorder} (severity {avg_sev:.1%}).\n\n"
+                            f"**Key Evidence:** Facial — {facial_summary[:80]}... "
+                            f"Speech — {speech_summary[:80]}... "
+                            f"Conversation — {convo_summary[:80]}...\n\n"
+                            f"**Recommended Next Steps:** Further clinical evaluation recommended."
+                        )
 
                     report_id = None
                     try:
+                        from utils.db import save_report
                         report_id = save_report(
                             user_id=session.user["id"],
                             psychologist_facial=facial_summary,
+                            psychologist_speech=speech_summary,
                             psychologist_conversation=convo_summary,
                             psychologist_conclusion=conclusion,
+                            integrated_summary=session_summary,
                             avg_severity=avg_sev,
                             likely_disorder=disorder,
                         )
@@ -515,8 +707,10 @@ async def ws_session(ws: WebSocket, token: str = ""):
                     await ws.send_json({
                         "type": "evaluation",
                         "facial": facial_summary,
+                        "speech": speech_summary,
                         "conversation": convo_summary,
                         "conclusion": conclusion,
+                        "session_summary": session_summary,
                         "report_id": report_id,
                         "avg_severity": avg_sev,
                         "disorder": disorder,

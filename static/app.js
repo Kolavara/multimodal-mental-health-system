@@ -24,6 +24,11 @@ let frameInterval = null;
 let timerInterval = null;
 let sessionStart = 0;
 
+// ── Voice Recording State ──
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecording = false;
+
 // ── Auth ──
 function switchAuthTab(tab) {
   document.getElementById('login-form').classList.toggle('hidden', tab!=='login');
@@ -74,10 +79,17 @@ function enterApp() {
   else { 
     navs.forEach(n=>{const p=n.dataset.page; if(p==='admin')n.style.display='none';}); 
     navigate('psychologist'); 
-    connectWS(); 
-    sessionStart=Date.now();
-    timerInterval=setInterval(updateTimer,1000);
+    // Don't auto-start session — wait for user to click "Start Session"
   }
+}
+
+function startSession() {
+  // Show immediate feedback
+  addChatMsg('system', '🔗 Connecting to clinical session...');
+  // Swap buttons
+  document.getElementById('start-session-btn').classList.add('hidden');
+  document.getElementById('end-session-sidebar-btn').classList.remove('hidden');
+  connectWS();
 }
 
 // ── Routing ──
@@ -97,18 +109,31 @@ function updateTimer() {
 
 // ── WebSocket ──
 function connectWS() {
+  if (ws && ws.readyState <= 1) { ws.close(); }
   const proto=location.protocol==='https:'?'wss':'ws';
   ws=new WebSocket(`${proto}://${location.host}/ws/session?token=${token}`);
+  ws.onopen=()=>{
+    sessionStart = Date.now();
+    timerInterval = setInterval(updateTimer, 1000);
+  };
   ws.onmessage=e=>{
     const msg=JSON.parse(e.data);
     if(msg.type==='status') addChatMsg('system','⏳ '+msg.message);
     else if(msg.type==='init_complete') addChatMsg('system','✅ Engines ready.');
     else if(msg.type==='chat_response') { addChatMsg('assistant',msg.message); document.getElementById('chat-agent-label').innerHTML='💬 Clinical Interaction — '+(msg.agent||'Psychologist').charAt(0).toUpperCase()+(msg.agent||'psychologist').slice(1)+' Active'; }
+    else if(msg.type==='chat_restore') { addChatMsg('user',msg.message); }
+    else if(msg.type==='voice_result') handleVoiceResult(msg);
     else if(msg.type==='telemetry') updateTelemetry(msg);
     else if(msg.type==='facial') updateFacialOverlay(msg);
     else if(msg.type==='evaluation') showEvaluation(msg);
     else if(msg.type==='halted') { addChatMsg('system','🚨 HALTED: '+msg.reason); }
     else if(msg.type==='error') addChatMsg('system','⚠️ '+msg.message);
+  };
+  ws.onerror=(err)=>{
+    console.error('WebSocket error:', err);
+    addChatMsg('system','⚠️ Connection error. Please try again.');
+    document.getElementById('start-session-btn').classList.remove('hidden');
+    document.getElementById('end-session-sidebar-btn').classList.add('hidden');
   };
   ws.onclose=()=>{ addChatMsg('system','Connection closed.'); };
 }
@@ -125,6 +150,116 @@ function sendChat() {
   const inp=document.getElementById('chat-input'), msg=inp.value.trim();
   if(!msg||!ws||ws.readyState!==1)return;
   addChatMsg('user',msg); ws.send(JSON.stringify({type:'chat',message:msg})); inp.value='';
+}
+
+// ── Voice Recording ──
+function toggleMic() {
+  if (isRecording) {
+    stopRecording();
+  } else {
+    startRecording();
+  }
+}
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = () => {
+      // Stop all audio tracks
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      sendVoiceMessage(blob);
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+    const micBtn = document.getElementById('mic-btn');
+    micBtn.classList.add('recording');
+    micBtn.textContent = '⏹';
+    micBtn.title = 'Recording... Click to stop & send';
+    // Show recording indicator in chat
+    addChatMsg('system', '<div class="voice-processing">🎤 Recording... <div class="dot-pulse"><span></span><span></span><span></span></div></div>');
+  } catch (err) {
+    console.error('Mic access denied:', err);
+    addChatMsg('system', '⚠️ Microphone access denied. Please allow microphone permissions.');
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  isRecording = false;
+  const micBtn = document.getElementById('mic-btn');
+  micBtn.classList.remove('recording');
+  micBtn.textContent = '🎤';
+  micBtn.title = 'Click to record voice';
+  // Immediately remove the "Recording..." indicator
+  removeVoiceIndicators();
+}
+
+function removeVoiceIndicators() {
+  const chatContainer = document.getElementById('chat-messages');
+  chatContainer.querySelectorAll('.voice-processing').forEach(el => {
+    const msgDiv = el.closest('.chat-msg');
+    if (msgDiv) msgDiv.remove();
+  });
+}
+
+function sendVoiceMessage(blob) {
+  if (!ws || ws.readyState !== 1) {
+    addChatMsg('system', '⚠️ Not connected. Cannot send voice message.');
+    return;
+  }
+  // Show processing indicator
+  addChatMsg('system', '<div class="voice-processing">🔄 Analyzing voice & prosody... <div class="dot-pulse"><span></span><span></span><span></span></div></div>');
+
+  const reader = new FileReader();
+  reader.onloadend = () => {
+    const base64 = reader.result.split(',')[1];
+    ws.send(JSON.stringify({ type: 'voice', data: base64 }));
+  };
+  reader.readAsDataURL(blob);
+}
+
+function handleVoiceResult(msg) {
+  // Remove ALL voice-processing indicators from the chat
+  removeVoiceIndicators();
+
+  if (msg.error) {
+    addChatMsg('system', '⚠️ ' + msg.error);
+    return;
+  }
+
+  // Display transcribed text as user message with prosody badge
+  const transcript = msg.transcript || '';
+  const prosody = msg.prosody || {};
+  const distress = msg.speech_distress || 0;
+
+  let prosodyHtml = '';
+  if (prosody.pitch_mean) {
+    prosodyHtml = '<div class="prosody-badge">' +
+      '🎤 Voice Analyzed | ' +
+      'Pitch: ' + prosody.pitch_mean.toFixed(0) + 'Hz | ' +
+      'Rate: ' + (prosody.speech_rate_wps || 0).toFixed(1) + ' wps | ' +
+      'Distress: ' + (distress * 100).toFixed(0) + '%' +
+      '</div>';
+  }
+
+  const div = document.createElement('div');
+  div.className = 'chat-msg user';
+  div.innerHTML = '<div class="msg-label">You 🎤</div>' +
+    transcript.replace(/\n/g, '<br>') + prosodyHtml;
+  const c = document.getElementById('chat-messages');
+  c.appendChild(div);
+  c.scrollTop = c.scrollHeight;
 }
 
 function endSession() { 
@@ -186,15 +321,11 @@ function updateTelemetry(d) {
   document.getElementById('tel-blink').textContent=(f.blink_rate||0).toFixed(1);
   document.getElementById('vid-severity').textContent='Severity: '+sev.toFixed(2);
   document.getElementById('vid-emotion').textContent='Emotion: '+(em.charAt(0).toUpperCase()+em.slice(1));
-  // Clinician page
-  document.getElementById('clin-severity').textContent=sev.toFixed(2)+' / 1.0';
-  document.getElementById('clin-severity-bar').style.width=(sev*100)+'%';
-  document.getElementById('clin-emotion').textContent=em.charAt(0).toUpperCase()+em.slice(1);
-  document.getElementById('clin-valence').textContent=(f.facial_valence||0).toFixed(2);
-  document.getElementById('clin-eye').textContent=((f.eye_contact_ratio||0)*100).toFixed(0)+'%';
-  document.getElementById('clin-head').textContent=(f.head_movement_velocity||0).toFixed(1);
   // Safety
-  if(d.halted) document.getElementById('clin-safety-content').innerHTML='<div class="crisis-banner"><div class="alert alert-error">🚨 SYSTEM IS HALTED</div><p>'+d.halt_reason+'</p></div><button class="btn btn-full mt-2" onclick="resetSafety()">✅ Acknowledge & Reset</button>';
+  if(d.halted) {
+    // Show halt indicator in Psychologist page if needed, or just chat
+    addChatMsg('system', '🚨 SYSTEM IS HALTED: ' + d.halt_reason);
+  }
   // Severity trend chart (update every ~2s = every 4th telemetry push at 500ms interval)
   sevUpdateCounter++;
   if(sevUpdateCounter % 4 === 0) {
@@ -209,7 +340,7 @@ function updateTelemetry(d) {
   }
 }
 
-function resetSafety() { if(ws&&ws.readyState===1) ws.send(JSON.stringify({type:'reset'})); document.getElementById('clin-safety-content').innerHTML='<div class="alert alert-success">✅ System Operating Normally</div><button class="btn btn-danger btn-full" onclick="emergencyHalt()">🛑 EMERGENCY STOP</button>'; }
+function resetSafety() { if(ws&&ws.readyState===1) ws.send(JSON.stringify({type:'reset'})); }
 
 function updateFacialOverlay(d) { /* facial data already handled via telemetry */ }
 
@@ -247,14 +378,34 @@ async function startVideo() {
 }
 
 // ── Evaluation ──
+function renderMarkdown(text) {
+  // Simple markdown: **bold**, newlines → <br>
+  return (text||'').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+}
+
 function showEvaluation(d) {
   const el=document.getElementById('evaluation-result'); el.classList.remove('hidden');
-  document.getElementById('eval-content').innerHTML=
-    '<h4>🎭 Facial Analysis</h4><p>'+d.facial+'</p><hr>'+
-    '<h4>💬 Conversation Analysis</h4><p>'+d.conversation+'</p><hr>'+
-    '<h4>📋 Agent Conclusion</h4><p>'+d.conclusion+'</p>'+
-    '<div class="grid-2 mt-2"><div class="metric-card"><div class="metric-label">Avg Severity</div><div class="metric-value">'+(d.avg_severity*100).toFixed(1)+'%</div></div>'+
-    '<div class="metric-card"><div class="metric-label">Likely Disorder</div><div class="metric-value">'+(d.disorder||'Unknown')+'</div></div></div>';
+  let html = '';
+
+  // Severity + Disorder metrics at top
+  html += '<div class="grid-2 mb-3">';
+  html += '<div class="metric-card"><div class="metric-label">Avg Severity</div><div class="metric-value">'+(d.avg_severity*100).toFixed(1)+'%</div></div>';
+  html += '<div class="metric-card"><div class="metric-label">Likely Disorder</div><div class="metric-value">'+(d.disorder||'Unknown')+'</div></div>';
+  html += '</div>';
+
+  // Multimodal Clinical Analysis — the main output
+  html += '<div class="neu-card" style="border-left:4px solid var(--accent-primary);margin-bottom:1.5rem">';
+  html += '<p class="section-header">🧬 Multimodal Clinical Analysis</p>';
+  html += '<div style="line-height:1.8;color:var(--text-primary)">'+renderMarkdown(d.session_summary)+'</div>';
+  html += '</div>';
+
+  // Collapsible raw detail sections
+  html += '<details class="expander mt-2"><summary>🎭 Facial Analysis (Raw)</summary><div class="expander-content"><p>'+(d.facial||'No facial data.')+'</p></div></details>';
+  html += '<details class="expander"><summary>🎤 Speech Analysis (Raw)</summary><div class="expander-content"><p>'+(d.speech||'No speech data.')+'</p></div></details>';
+  html += '<details class="expander"><summary>💬 Conversation Analysis (Raw)</summary><div class="expander-content"><p>'+(d.conversation||'No conversation data.')+'</p></div></details>';
+  html += '<details class="expander"><summary>📋 Agent Conclusion (Raw)</summary><div class="expander-content"><p>'+(d.conclusion||'No conclusion.')+'</p></div></details>';
+
+  document.getElementById('eval-content').innerHTML = html;
   window._evalData=d;
 }
 
@@ -304,7 +455,45 @@ async function loadReports() {
       const sev=rp.avg_severity||0, sevL=sev>=0.7?'HIGH':sev>=0.3?'MODERATE':'LOW', sevC=sev>=0.7?'sev-high':sev>=0.3?'sev-moderate':'sev-low';
       html+='<div class="report-card"><div class="report-header"><div><span class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.08em">Session #'+(reports.length-i)+'</span><h4>📅 '+(rp.timestamp||'').replace('T',' ').slice(0,19)+'</h4></div><div class="flex gap-1"><span class="badge-pill '+sevC+'">'+sevL+' ('+(sev*100).toFixed(0)+'%)</span></div></div>';
       html+='<div style="margin-top:0.5rem">'+(rp.psychologist_conclusion?'<span class="badge badge-green">🧠 Psychologist ✓</span>':'')+(rp.integrated_summary?'<span class="badge badge-purple">🧬 Integrated ✓</span>':'')+'</div>';
-      html+='<details class="expander mt-2"><summary>🧠 Psychologist Findings</summary><div class="expander-content">'+(rp.psychologist_conclusion?'<p><strong>Facial:</strong> '+(rp.psychologist_facial||'N/A')+'</p><p><strong>Conversation:</strong> '+(rp.psychologist_conversation||'N/A')+'</p><p><strong>Conclusion:</strong> '+rp.psychologist_conclusion+'</p>':'<p class="text-muted">No data.</p>')+'</div></details>';
+      html+='<details class="expander mt-2"><summary>🧠 Psychologist Findings</summary><div class="expander-content">'+(rp.psychologist_conclusion?'<p><strong>Facial:</strong> '+(rp.psychologist_facial||'N/A')+'</p><p><strong>Speech:</strong> '+(rp.psychologist_speech||'N/A')+'</p><p><strong>Conversation:</strong> '+(rp.psychologist_conversation||'N/A')+'</p><p><strong>Conclusion:</strong> '+rp.psychologist_conclusion+'</p>':'<p class="text-muted">No data.</p>')+'</div></details>';
+      
+      // Psychiatrist Findings
+      let psychHtml = '<p class="text-muted">No psychiatric lab data.</p>';
+      try {
+        let hasData = false;
+        let htmlParts = [];
+        
+        // Show abnormalities
+        const ab = typeof rp.psychiatrist_abnormalities === 'string' ? JSON.parse(rp.psychiatrist_abnormalities) : rp.psychiatrist_abnormalities;
+        if(ab && ab.length) {
+          hasData = true;
+          htmlParts.push('<p class="text-sm font-semibold mb-1" style="color:var(--error-color)">Abnormal Findings:</p>');
+          htmlParts.push(ab.map(a => `<div class="mb-2 pl-2" style="border-left: 2px solid var(--error-color)"><strong>⚠️ ${a.param}: ${a.value}</strong><br><span class="text-xs">Disorder: ${a.disorder}</span><br><span class="text-xs">Solution: ${a.solution}</span></div>`).join(''));
+        }
+        
+        // Show normal params
+        const pa = typeof rp.psychiatrist_params === 'string' ? JSON.parse(rp.psychiatrist_params) : rp.psychiatrist_params;
+        if(pa && Object.keys(pa).length) {
+          hasData = true;
+          // Filter out the ones that are already in abnormalities
+          const abKeys = (ab || []).map(a => a.param);
+          const normalKeys = Object.keys(pa).filter(k => !abKeys.includes(k));
+          
+          if (normalKeys.length > 0) {
+              if (htmlParts.length > 0) htmlParts.push('<div class="mt-3"></div>');
+              htmlParts.push('<p class="text-sm font-semibold mb-1" style="color:var(--success-color)">Normal Findings:</p>');
+              htmlParts.push('<div class="grid-2 gap-1">');
+              normalKeys.forEach(k => {
+                  htmlParts.push(`<div class="text-sm">✅ <strong>${k}</strong>: ${pa[k]}</div>`);
+              });
+              htmlParts.push('</div>');
+          }
+        }
+        
+        if (hasData) psychHtml = htmlParts.join('');
+      } catch(e) {}
+      html+='<details class="expander"><summary>⚕️ Psychiatrist Findings</summary><div class="expander-content">'+psychHtml+'</div></details>';
+      
       html+='<details class="expander"><summary>🧬 Integrated Summary</summary><div class="expander-content">'+(rp.integrated_summary||'<p class="text-muted">No integrated summary.</p>')+'</div></details></div>';
     });
     el.innerHTML=html;
@@ -434,7 +623,42 @@ async function viewPatient(uid,name) {
     const sev=rp.avg_severity||0, sevL=sev>=0.7?'HIGH':sev>=0.3?'MODERATE':'LOW', sevC=sev>=0.7?'sev-high':sev>=0.3?'sev-moderate':'sev-low';
     html+='<div class="report-card"><div class="report-header"><div><span class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.08em">Session #'+(reports.length-i)+'</span><h4>📅 '+(rp.timestamp||'').replace('T',' ').slice(0,19)+'</h4></div><div class="flex gap-1"><span class="badge-pill '+sevC+'">'+sevL+' ('+(sev*100).toFixed(0)+'%)</span></div></div>';
     html+='<div style="margin-top:0.5rem">'+(rp.psychologist_conclusion?'<span class="badge badge-green">🧠 Psychologist ✓</span>':'')+(rp.integrated_summary?'<span class="badge badge-purple">🧬 Integrated ✓</span>':'')+'</div>';
-    html+='<details class="expander mt-2"><summary>🧠 Psychologist Findings</summary><div class="expander-content">'+(rp.psychologist_conclusion?'<p><strong>Facial:</strong> '+(rp.psychologist_facial||'N/A')+'</p><p><strong>Conversation:</strong> '+(rp.psychologist_conversation||'N/A')+'</p><p><strong>Conclusion:</strong> '+rp.psychologist_conclusion+'</p>':'<p class="text-muted">No data.</p>')+'</div></details>';
+    html+='<details class="expander mt-2"><summary>🧠 Psychologist Findings</summary><div class="expander-content">'+(rp.psychologist_conclusion?'<p><strong>Facial:</strong> '+(rp.psychologist_facial||'N/A')+'</p><p><strong>Speech:</strong> '+(rp.psychologist_speech||'N/A')+'</p><p><strong>Conversation:</strong> '+(rp.psychologist_conversation||'N/A')+'</p><p><strong>Conclusion:</strong> '+rp.psychologist_conclusion+'</p>':'<p class="text-muted">No data.</p>')+'</div></details>';
+    
+    // Psychiatrist Findings
+    let psychHtml = '<p class="text-muted">No psychiatric lab data.</p>';
+    try {
+      let hasData = false;
+      let htmlParts = [];
+      
+      const ab = typeof rp.psychiatrist_abnormalities === 'string' ? JSON.parse(rp.psychiatrist_abnormalities) : rp.psychiatrist_abnormalities;
+      if(ab && ab.length) {
+        hasData = true;
+        htmlParts.push('<p class="text-sm font-semibold mb-1" style="color:var(--error-color)">Abnormal Findings:</p>');
+        htmlParts.push(ab.map(a => `<div class="mb-2 pl-2" style="border-left: 2px solid var(--error-color)"><strong>⚠️ ${a.param}: ${a.value}</strong><br><span class="text-xs">Disorder: ${a.disorder}</span><br><span class="text-xs">Solution: ${a.solution}</span></div>`).join(''));
+      }
+      
+      const pa = typeof rp.psychiatrist_params === 'string' ? JSON.parse(rp.psychiatrist_params) : rp.psychiatrist_params;
+      if(pa && Object.keys(pa).length) {
+        hasData = true;
+        const abKeys = (ab || []).map(a => a.param);
+        const normalKeys = Object.keys(pa).filter(k => !abKeys.includes(k));
+        
+        if (normalKeys.length > 0) {
+            if (htmlParts.length > 0) htmlParts.push('<div class="mt-3"></div>');
+            htmlParts.push('<p class="text-sm font-semibold mb-1" style="color:var(--success-color)">Normal Findings:</p>');
+            htmlParts.push('<div class="grid-2 gap-1">');
+            normalKeys.forEach(k => {
+                htmlParts.push(`<div class="text-sm">✅ <strong>${k}</strong>: ${pa[k]}</div>`);
+            });
+            htmlParts.push('</div>');
+        }
+      }
+      
+      if (hasData) psychHtml = htmlParts.join('');
+    } catch(e) {}
+    html+='<details class="expander"><summary>⚕️ Psychiatrist Findings</summary><div class="expander-content">'+psychHtml+'</div></details>';
+    
     html+='<details class="expander"><summary>🧬 Integrated Summary</summary><div class="expander-content">'+(rp.integrated_summary||'<p class="text-muted">No integrated summary.</p>')+'</div></details></div>';
   });
   det.innerHTML=html;
@@ -591,6 +815,7 @@ function checkShowIntegratedSection(){
   if(hasEval){
     previewHtml+='<details class="expander"><summary>View Psychologist Findings</summary><div class="expander-content">';
     previewHtml+='<p>'+(window._evalData.facial||'N/A')+'</p>';
+    previewHtml+='<p>'+(window._evalData.speech||'N/A')+'</p>';
     previewHtml+='<p>'+(window._evalData.conversation||'N/A')+'</p>';
     previewHtml+='<p><strong>Agent Conclusion:</strong> '+(window._evalData.conclusion||'N/A')+'</p>';
     previewHtml+='</div></details>';
@@ -623,7 +848,7 @@ function checkShowIntegratedSection(){
 async function generateIntegrated(){
   const hasEval=!!window._evalData, hasData=!!psychData;
   if(!hasEval && !hasData){alert('No data available for integration.');return;}
-  const body={has_psychological:hasEval,has_psychiatric:hasData,psychologist_text:hasEval?('Facial: '+(window._evalData.facial||'')+'\nConversation: '+(window._evalData.conversation||'')+'\nConclusion: '+(window._evalData.conclusion||'')):'',psychiatrist_text:hasData?[...(psychData.abnormal||[]).map(a=>a.param+': '+a.value+' (Normal: '+a.min+'–'+a.max+') → '+a.disorder),...(psychData.normal||[]).map(n=>n.param+': '+n.value+' → Within normal limits')].join('\n'):'',abnormal:psychData?.abnormal||[],normal:psychData?.normal||[],params:psychData?.params||{},report_id:window._evalData?.report_id||null,psych_severity:window._evalData?.avg_severity||0,evaluation:window._evalData||{}};
+  const body={has_psychological:hasEval,has_psychiatric:hasData,psychologist_text:hasEval?('Facial: '+(window._evalData.facial||'')+'\nSpeech: '+(window._evalData.speech||'')+'\nConversation: '+(window._evalData.conversation||'')+'\nConclusion: '+(window._evalData.conclusion||'')):'',psychiatrist_text:hasData?[...(psychData.abnormal||[]).map(a=>a.param+': '+a.value+' (Normal: '+a.min+'–'+a.max+') → '+a.disorder),...(psychData.normal||[]).map(n=>n.param+': '+n.value+' → Within normal limits')].join('\n'):'',abnormal:psychData?.abnormal||[],normal:psychData?.normal||[],params:psychData?.params||{},report_id:window._evalData?.report_id||null,psych_severity:window._evalData?.avg_severity||0,evaluation:window._evalData||{}};
   document.getElementById('psych-integrated-result').innerHTML='<div class="spinner"></div><p class="text-center text-muted">🧬 Generating integrated clinical summary...</p>';
   document.getElementById('psych-integrated-result').classList.remove('hidden');
   try {

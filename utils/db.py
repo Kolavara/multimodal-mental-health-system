@@ -48,6 +48,7 @@ def init_db():
             user_id INTEGER NOT NULL,
             timestamp TEXT NOT NULL,
             psychologist_facial TEXT DEFAULT '',
+            psychologist_speech TEXT DEFAULT '',
             psychologist_conversation TEXT DEFAULT '',
             psychologist_conclusion TEXT DEFAULT '',
             psychiatrist_params TEXT DEFAULT '{}',
@@ -58,6 +59,12 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
+
+    # Migrations: Add psychologist_speech column if it doesn't exist
+    try:
+        c.execute("ALTER TABLE reports ADD COLUMN psychologist_speech TEXT DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
     # Seed demo accounts if they don't exist
     try:
@@ -115,6 +122,7 @@ def create_user(username: str, password: str, display_name: str, role: str = "us
 def save_report(
     user_id: int,
     psychologist_facial: str = "",
+    psychologist_speech: str = "",
     psychologist_conversation: str = "",
     psychologist_conclusion: str = "",
     psychiatrist_params: dict = None,
@@ -128,14 +136,16 @@ def save_report(
     c = conn.cursor()
     c.execute(
         """INSERT INTO reports 
-           (user_id, timestamp, psychologist_facial, psychologist_conversation, 
-            psychologist_conclusion, psychiatrist_params, psychiatrist_abnormalities,
+           (user_id, timestamp, psychologist_facial, psychologist_speech, 
+            psychologist_conversation, psychologist_conclusion, 
+            psychiatrist_params, psychiatrist_abnormalities,
             integrated_summary, avg_severity, likely_disorder)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             user_id,
             datetime.now().isoformat(),
             psychologist_facial,
+            psychologist_speech,
             psychologist_conversation,
             psychologist_conclusion,
             json.dumps(psychiatrist_params or {}),

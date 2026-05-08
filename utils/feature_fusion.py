@@ -78,23 +78,46 @@ class FeatureFusionEngine:
         }
 
     def record_chat_snapshot(self):
-        """Called when user sends a chat message.
-        Takes a blended snapshot of facial + text distress and appends to history.
+        """Called when user sends a chat message (typed or voice).
+        Computes a blended severity snapshot using tri-modal weighted fusion:
+          - Conversation content (what they say): 45%
+          - Facial expressions & body language:   30%
+          - Speech characteristics (prosody):     25%
+        Falls back to 60% facial / 40% text when no voice prosody is available.
+        
+        Research basis: Menne et al. (2024) BMC Psychiatry — 
+        "The voice of depression: speech features as biomarkers for MDD"
         """
         fv = self.latest_facial.get('facial_valence', 0.0)
         facial_distress = max(0.0, min(1.0, -fv))
         content_distress = self.latest_speech.get('content_distress', 0.0)
 
-        # 60% visual (facial) / 40% text (conversation) blend
-        blended = (facial_distress * 0.60) + (content_distress * 0.40)
-        blended = min(1.0, max(0.0, blended))
+        # Check if we have real prosodic data from voice input
+        has_prosody = self.latest_speech.get('has_prosody', False)
 
+        if has_prosody:
+            # Tri-modal fusion (voice was used)
+            # Speech distress from prosodic features (pitch, jitter, shimmer, pauses, etc.)
+            speech_distress = self.latest_speech.get('speech_distress', 0.0)
+            
+            # Weighted blend: 45% text content, 30% facial, 25% speech prosody
+            blended = (content_distress * 0.45) + (facial_distress * 0.30) + (speech_distress * 0.25)
+            self.logger.info(
+                f"TRI-MODAL snapshot: text={content_distress:.2f}(45%), "
+                f"facial={facial_distress:.2f}(30%), speech={speech_distress:.2f}(25%), "
+                f"blended={blended:.2f}"
+            )
+        else:
+            # Fallback: 60% facial / 40% text (typed input only, no prosody)
+            blended = (facial_distress * 0.60) + (content_distress * 0.40)
+            self.logger.info(
+                f"DUAL-MODE snapshot: facial={facial_distress:.2f}(60%), "
+                f"text={content_distress:.2f}(40%), blended={blended:.2f}"
+            )
+
+        blended = min(1.0, max(0.0, blended))
         self.severity_history.append(blended)
-        self.logger.info(
-            f"Chat snapshot: facial={facial_distress:.2f}, "
-            f"text={content_distress:.2f}, blended={blended:.2f}, "
-            f"avg={sum(self.severity_history)/len(self.severity_history):.2f}"
-        )
+
         # Refresh the state vector with the new average
         self._recalculate()
 
