@@ -7,13 +7,14 @@ Recently completely re-architected from a Streamlit application into a **high-pe
 ## 🌟 Key Features
 
 *   **Real-Time WebSockets:** Zero-latency streaming of patient telemetry, webcam video, and chat communications via FastAPI WebSockets.
-*   **Multimodal Feature Fusion:** Real-time blending of visual (facial expressions) and auditory (speech sentiment) distress signals to calculate a dynamic patient severity score.
+*   **Multimodal Feature Fusion:** Real-time blending of visual (facial expressions) and auditory (speech sentiment & prosody) distress signals to calculate a dynamic patient severity score.
+*   **Clinical Vocal Prosody Analysis:** Advanced speech engine extracts acoustic features (pitch, vocal arousal, speech rate) to detect subtle markers of psychiatric disorders.
 *   **Role-Based Access Control (RBAC):** Secure JWT-based authentication system with tailored UI masking for patients, clinicians, and administrators.
-*   **AI Psychologist Agent:** A conversational agent that conducts interactive therapy sessions, tracks patient state, and synthesizes clinical notes.
-*   **Integrated Psychiatric Reports:** Blends conversational findings with simulated clinical biomarkers (e.g., Cortisol, Serotonin) to generate a comprehensive diagnostic summary.
+*   **AI Psychologist Agent with Continuity of Care:** A conversational agent that conducts interactive therapy sessions, synthesizes clinical notes, and explicitly **remembers past sessions** to provide continuous, long-term care.
+*   **Integrated Psychiatric Reports:** Blends conversational findings with simulated clinical biomarkers (e.g., Cortisol, Serotonin) to generate a comprehensive diagnostic summary. Both abnormal and normal findings are explicitly tracked and displayed.
 *   **Longitudinal Tracking:** Persistent patient history with interactive **Chart.js** "Risk Level Trend" visualization to track progress over multiple sessions.
 *   **Dark Neumorphic UI:** A sleek, premium Dark Neumorphic aesthetic with an integrated Light/Dark mode toggle.
-*   **Local-First Architecture:** Designed to run sensitive inferencing locally on hardware, ensuring data privacy and low latency.
+*   **Local-First Architecture:** Designed to run sensitive inferencing locally on hardware, ensuring data privacy and low latency. Models are pre-loaded at server startup for zero-latency session initialization.
 
 ---
 
