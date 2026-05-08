@@ -219,13 +219,20 @@ class EmotionClassifier:
         return exp_raw / exp_raw.sum()
 
 
+import threading as _threading
+
 # Singleton instance
 _classifier_instance = None
+_classifier_lock = _threading.Lock()
 
 def get_emotion_classifier() -> EmotionClassifier:
     """Get or create the singleton EmotionClassifier."""
     global _classifier_instance
-    if _classifier_instance is None:
+    if _classifier_instance is not None:
+        return _classifier_instance
+    with _classifier_lock:
+        if _classifier_instance is not None:
+            return _classifier_instance
         _classifier_instance = EmotionClassifier()
     return _classifier_instance
 

@@ -33,20 +33,40 @@ except ImportError:
     CFG = FallbackConfig()
 
 
+# ── Lazy-loaded WhisperModel singleton (only loaded on first transcription) ──
+_whisper_model = None
+_whisper_lock = threading.Lock()
+
+
+def _get_cached_whisper_model():
+    """Return a singleton WhisperModel, loading it only on first call."""
+    global _whisper_model
+    if _whisper_model is not None:
+        return _whisper_model
+    with _whisper_lock:
+        if _whisper_model is not None:
+            return _whisper_model
+        logging.getLogger(__name__).info(
+            f"Loading faster-whisper {CFG.WHISPER_MODEL_SIZE} on {CFG.WHISPER_DEVICE}..."
+        )
+        _whisper_model = WhisperModel(
+            CFG.WHISPER_MODEL_SIZE,
+            device=CFG.WHISPER_DEVICE,
+            compute_type=CFG.WHISPER_COMPUTE_TYPE
+        )
+        logging.getLogger(__name__).info("Speech model loaded.")
+        return _whisper_model
+
+
 class SpeechAnalysisEngine:
     def __init__(self, patient_id: str, session_id: str):
         self.patient_id = patient_id
         self.session_id = session_id
         self.logger = logging.getLogger(__name__)
         
-        # Load whisper model (CPU optimized)
-        self.logger.info(f"Loading faster-whisper {CFG.WHISPER_MODEL_SIZE} on {CFG.WHISPER_DEVICE}...")
-        self.model = WhisperModel(
-            CFG.WHISPER_MODEL_SIZE, 
-            device=CFG.WHISPER_DEVICE, 
-            compute_type=CFG.WHISPER_COMPUTE_TYPE
-        )
-        self.logger.info("Speech model loaded.")
+        # Whisper model is loaded lazily on first transcription call
+        # (not used in current UI — text input goes through Groq LLM)
+        self._model = None
         
         # State tracking
         self.transcript_history = []
@@ -68,6 +88,13 @@ class SpeechAnalysisEngine:
         
         # Init Groq LLM for text analysis
         self.llm = ChatGroq(api_key=CFG.GROQ_API_KEY, model_name=CFG.GROQ_MODEL, temperature=0.0)
+
+    @property
+    def model(self):
+        """Lazy-load WhisperModel only when transcription is actually needed."""
+        if self._model is None:
+            self._model = _get_cached_whisper_model()
+        return self._model
 
     def push_webrtc_audio(self, chunk: np.ndarray):
         """Pushed from dashboard/video_call.py WebRTC AudioProcessor"""
