@@ -593,15 +593,21 @@ async function startVideo() {
 // ── Evaluation ──
 function renderMarkdown(text) {
   let html = (text||'')
+    // Inject breaks before numbered items and bold headings if they lack newlines
+    .replace(/(\s|^)(\d+\.\s+\*\*)/g, '$1<br><br>$2')
+    .replace(/(\s|^)(\*\*[A-Z][A-Za-z\s]+:\*\*)/g, '$1<br><br>$2')
+    // Standard headers
     .replace(/^### (.*$)/gim, '<h5 class="mt-2 mb-1" style="color:var(--text-primary)">$1</h5>')
     .replace(/^## (.*$)/gim, '<h4 class="mt-2 mb-1" style="color:var(--text-primary)">$1</h4>')
     .replace(/^# (.*$)/gim, '<h3 class="mt-2 mb-1" style="color:var(--text-primary)">$1</h3>')
+    // Lists and emphasis
     .replace(/^\* (.*$)/gim, '• $1')
     .replace(/^- (.*$)/gim, '• $1')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/\n/g, '<br>');
-  return html.replace(/(<br>\s*){3,}/g, '<br><br>');
+    
+  return html.replace(/(<br>\s*){3,}/g, '<br><br>').trim();
 }
 
 function showEvaluation(d) {
@@ -676,7 +682,7 @@ async function loadReports() {
       const sev=rp.avg_severity||0, sevL=sev>=0.7?'HIGH':sev>=0.3?'MODERATE':'LOW', sevC=sev>=0.7?'sev-high':sev>=0.3?'sev-moderate':'sev-low';
       html+='<div class="report-card"><div class="report-header"><div><span class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.08em">Session #'+(reports.length-i)+'</span><h4>📅 '+(rp.timestamp||'').replace('T',' ').slice(0,19)+'</h4></div><div class="flex gap-1"><span class="badge-pill '+sevC+'">'+sevL+' ('+(sev*100).toFixed(0)+'%)</span></div></div>';
       html+='<div style="margin-top:0.5rem">'+(rp.psychologist_conclusion?'<span class="badge badge-green">🧠 Psychologist ✓</span>':'')+(rp.integrated_summary?'<span class="badge badge-purple">🧬 Integrated ✓</span>':'')+'</div>';
-      html+='<details class="expander mt-2"><summary>🧠 Psychologist Findings</summary><div class="expander-content">'+(rp.psychologist_conclusion?'<p><strong>Facial:</strong> '+(rp.psychologist_facial||'N/A')+'</p><p><strong>Speech:</strong> '+(rp.psychologist_speech||'N/A')+'</p><p><strong>Conversation:</strong> '+(rp.psychologist_conversation||'N/A')+'</p><p><strong>Conclusion:</strong> '+rp.psychologist_conclusion+'</p>':'<p class="text-muted">No data.</p>')+'</div></details>';
+      html+='<details class="expander mt-2"><summary>🧠 Psychologist Findings</summary><div class="expander-content">'+(rp.psychologist_conclusion?'<p><strong>Facial:</strong> '+(rp.psychologist_facial||'N/A')+'</p><p><strong>Speech:</strong> '+(rp.psychologist_speech||'N/A')+'</p><p><strong>Conversation:</strong> '+(rp.psychologist_conversation||'N/A')+'</p><div><strong>Conclusion:</strong><br> '+renderMarkdown(rp.psychologist_conclusion)+'</div>':'<p class="text-muted">No data.</p>')+'</div></details>';
       
       // Psychiatrist Findings
       let psychHtml = '<p class="text-muted">No psychiatric lab data.</p>';
@@ -844,7 +850,7 @@ async function viewPatient(uid,name) {
     const sev=rp.avg_severity||0, sevL=sev>=0.7?'HIGH':sev>=0.3?'MODERATE':'LOW', sevC=sev>=0.7?'sev-high':sev>=0.3?'sev-moderate':'sev-low';
     html+='<div class="report-card"><div class="report-header"><div><span class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.08em">Session #'+(reports.length-i)+'</span><h4>📅 '+(rp.timestamp||'').replace('T',' ').slice(0,19)+'</h4></div><div class="flex gap-1"><span class="badge-pill '+sevC+'">'+sevL+' ('+(sev*100).toFixed(0)+'%)</span></div></div>';
     html+='<div style="margin-top:0.5rem">'+(rp.psychologist_conclusion?'<span class="badge badge-green">🧠 Psychologist ✓</span>':'')+(rp.integrated_summary?'<span class="badge badge-purple">🧬 Integrated ✓</span>':'')+'</div>';
-    html+='<details class="expander mt-2"><summary>🧠 Psychologist Findings</summary><div class="expander-content">'+(rp.psychologist_conclusion?'<p><strong>Facial:</strong> '+(rp.psychologist_facial||'N/A')+'</p><p><strong>Speech:</strong> '+(rp.psychologist_speech||'N/A')+'</p><p><strong>Conversation:</strong> '+(rp.psychologist_conversation||'N/A')+'</p><p><strong>Conclusion:</strong> '+rp.psychologist_conclusion+'</p>':'<p class="text-muted">No data.</p>')+'</div></details>';
+    html+='<details class="expander mt-2"><summary>🧠 Psychologist Findings</summary><div class="expander-content">'+(rp.psychologist_conclusion?'<p><strong>Facial:</strong> '+(rp.psychologist_facial||'N/A')+'</p><p><strong>Speech:</strong> '+(rp.psychologist_speech||'N/A')+'</p><p><strong>Conversation:</strong> '+(rp.psychologist_conversation||'N/A')+'</p><div><strong>Conclusion:</strong><br> '+renderMarkdown(rp.psychologist_conclusion)+'</div>':'<p class="text-muted">No data.</p>')+'</div></details>';
     
     // Psychiatrist Findings
     let psychHtml = '<p class="text-muted">No psychiatric lab data.</p>';
