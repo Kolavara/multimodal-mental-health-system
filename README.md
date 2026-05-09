@@ -10,7 +10,7 @@ Recently completely re-architected from a Streamlit application into a **high-pe
 *   **Continuous Voice Activity Detection (VAD):** A persistent "Conversation Mode" keeps the microphone open, automatically detecting natural silence boundaries to transmit spoken chunks. It actively mutes input during AI playback to prevent audio feedback.
 *   **Multimodal Feature Fusion:** Real-time blending of visual (facial expressions) and auditory (speech sentiment & prosody) distress signals to calculate a dynamic patient severity score.
 *   **Clinical Vocal Prosody Analysis:** Advanced speech engine extracts acoustic features (pitch, vocal arousal, speech rate) to detect subtle markers of psychiatric disorders.
-*   **Role-Based Access Control (RBAC):** Secure JWT-based authentication system with tailored UI masking for patients, clinicians, and administrators.
+*   **Role-Based Access Control (RBAC):** Secure JWT-based authentication system with tailored UI masking for patients and administrators.
 *   **AI Psychologist Agent with Continuity of Care:** A conversational agent that conducts interactive therapy sessions, synthesizes clinical notes, and explicitly **remembers past sessions** to provide continuous, long-term care.
 *   **Integrated Psychiatric Reports:** Blends conversational findings with simulated clinical biomarkers (e.g., Cortisol, Serotonin) to generate a comprehensive diagnostic summary. Both abnormal and normal findings are explicitly tracked and displayed.
 *   **Longitudinal Tracking:** Persistent patient history with interactive **Chart.js** "Risk Level Trend" visualization to track progress over multiple sessions.
