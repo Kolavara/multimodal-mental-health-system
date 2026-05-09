@@ -7,6 +7,7 @@ Recently completely re-architected from a Streamlit application into a **high-pe
 ## 🌟 Key Features
 
 *   **Real-Time WebSockets:** Zero-latency streaming of patient telemetry, webcam video, and chat communications via FastAPI WebSockets.
+*   **Continuous Voice Activity Detection (VAD):** A persistent "Conversation Mode" keeps the microphone open, automatically detecting natural silence boundaries to transmit spoken chunks. It actively mutes input during AI playback to prevent audio feedback.
 *   **Multimodal Feature Fusion:** Real-time blending of visual (facial expressions) and auditory (speech sentiment & prosody) distress signals to calculate a dynamic patient severity score.
 *   **Clinical Vocal Prosody Analysis:** Advanced speech engine extracts acoustic features (pitch, vocal arousal, speech rate) to detect subtle markers of psychiatric disorders.
 *   **Role-Based Access Control (RBAC):** Secure JWT-based authentication system with tailored UI masking for patients, clinicians, and administrators.
