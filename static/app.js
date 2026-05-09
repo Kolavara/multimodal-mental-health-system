@@ -24,10 +24,23 @@ let frameInterval = null;
 let timerInterval = null;
 let sessionStart = 0;
 
-// ── Voice Recording State ──
+// ── Voice Activity Detection (VAD) State ──
 let mediaRecorder = null;
 let audioChunks = [];
-let isRecording = false;
+let isRecording = false;          // true while mic is "open" (VAD active)
+let isSpeaking = false;           // true while user is currently talking
+let vadStream = null;             // raw MediaStream kept open
+let vadAudioCtx = null;           // Web Audio API context
+let vadAnalyser = null;           // AnalyserNode for RMS analysis
+let vadAnimFrame = null;          // requestAnimationFrame handle
+let silenceTimer = null;          // setTimeout handle for 7-second silence
+let vadChunkInterval = null;      // timeslice interval for dataavailable events
+let convMode = false;             // true = stay-open conversation mode
+let ttsPlaying = false;           // true while AI TTS audio is playing (mute VAD)
+
+const VAD_SILENCE_MS        = 7000;  // send after 7 s of silence
+const VAD_SILENCE_THRESHOLD = 8;     // RMS below this = silence (0–255 scale)
+const VAD_MIN_SPEECH_MS     = 400;   // ignore bursts shorter than this
 
 // ── Auth ──
 function switchAuthTab(tab) {
@@ -120,7 +133,7 @@ function connectWS() {
     const msg=JSON.parse(e.data);
     if(msg.type==='status') addChatMsg('system','⏳ '+msg.message);
     else if(msg.type==='init_complete') addChatMsg('system','✅ Engines ready.');
-    else if(msg.type==='chat_response') { addChatMsg('assistant',msg.message); document.getElementById('chat-agent-label').innerHTML='💬 Clinical Interaction — '+(msg.agent||'Psychologist').charAt(0).toUpperCase()+(msg.agent||'psychologist').slice(1)+' Active'; }
+    else if(msg.type==='chat_response') { addChatMsg('assistant',msg.message); document.getElementById('chat-agent-label').innerHTML='💬 Clinical Interaction — '+(msg.agent||'Psychologist').charAt(0).toUpperCase()+(msg.agent||'psychologist').slice(1)+' Active'; _resumeListening(); }
     else if(msg.type==='chat_restore') { addChatMsg('user',msg.message); }
     else if(msg.type==='voice_result') handleVoiceResult(msg);
     else if(msg.type==='telemetry') updateTelemetry(msg);
@@ -152,62 +165,244 @@ function sendChat() {
   addChatMsg('user',msg); ws.send(JSON.stringify({type:'chat',message:msg})); inp.value='';
 }
 
-// ── Voice Recording ──
+// ── Voice Activity Detection (VAD) — Conversation Mode ──
+//
+// Flow:
+//   toggleMic()    → enters conversation mode (mic stays open)
+//   toggleMic()    → exits conversation mode, closes mic
+//   After silence  → sends audio, keeps mic open, waits for AI reply
+//   AI reply done  → _resumeListening() restores listening state
+//   ttsPlaying=true → VAD ignores audio while AI is speaking
+
 function toggleMic() {
-  if (isRecording) {
-    stopRecording();
+  if (convMode) {
+    convMode = false;
+    vadStop(false);
+    addChatMsg('system', '🔇 Voice conversation ended.');
   } else {
-    startRecording();
+    convMode = true;
+    vadStart();
   }
 }
 
-async function startRecording() {
+async function vadStart() {
+  if (!convMode) return;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+    vadStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+    vadAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = vadAudioCtx.createMediaStreamSource(vadStream);
+    vadAnalyser = vadAudioCtx.createAnalyser();
+    vadAnalyser.fftSize = 512;
+    source.connect(vadAnalyser);
+
+    mediaRecorder = new MediaRecorder(vadStream, { mimeType: 'audio/webm;codecs=opus' });
     audioChunks = [];
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.start(100);
 
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunks.push(e.data);
-    };
-
-    mediaRecorder.onstop = () => {
-      // Stop all audio tracks
-      stream.getTracks().forEach(t => t.stop());
-      const blob = new Blob(audioChunks, { type: 'audio/webm' });
-      sendVoiceMessage(blob);
-    };
-
-    mediaRecorder.start();
     isRecording = true;
-    const micBtn = document.getElementById('mic-btn');
-    micBtn.classList.add('recording');
-    micBtn.textContent = '⏹';
-    micBtn.title = 'Recording... Click to stop & send';
-    // Show recording indicator in chat
-    addChatMsg('system', '<div class="voice-processing">🎤 Recording... <div class="dot-pulse"><span></span><span></span><span></span></div></div>');
+    isSpeaking = false;
+    ttsPlaying = false;
+    _initChunk = null; // reset init segment for new session
+
+    _updateMicUI('listening');
+    _setStatusBar('👂 Listening — speak whenever you\'re ready');
+    _vadLoop();
   } catch (err) {
     console.error('Mic access denied:', err);
-    addChatMsg('system', '⚠️ Microphone access denied. Please allow microphone permissions.');
+    convMode = false;
+    _updateMicUI('idle');
+    addChatMsg('system', '⚠️ Microphone access denied.');
   }
 }
 
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+function _vadLoop() {
+  if (!vadAnalyser || !isRecording) return;
+
+  const buf = new Uint8Array(vadAnalyser.frequencyBinCount);
+  vadAnalyser.getByteTimeDomainData(buf);
+
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) { const v = buf[i] - 128; sum += v * v; }
+  const rms = Math.sqrt(sum / buf.length);
+
+  if (!ttsPlaying) {
+    const speaking = rms > VAD_SILENCE_THRESHOLD;
+    if (speaking && !isSpeaking) {
+      isSpeaking = true;
+      _clearSilenceTimer();
+      _updateMicUI('speaking');
+      _setStatusBar('🗣️ Speaking...');
+    } else if (!speaking && isSpeaking) {
+      isSpeaking = false;
+      _updateMicUI('listening');
+      _startSilenceTimer();
+    }
   }
+
+  vadAnimFrame = requestAnimationFrame(_vadLoop);
+}
+
+function _startSilenceTimer() {
+  _clearSilenceTimer();
+  let remaining = Math.ceil(VAD_SILENCE_MS / 1000);
+  _setStatusBar(`🤫 Sending in ${remaining}s...`);
+
+  const countInterval = setInterval(() => {
+    remaining--;
+    if (remaining > 0) _setStatusBar(`🤫 Sending in ${remaining}s...`);
+  }, 1000);
+
+  silenceTimer = setTimeout(() => {
+    clearInterval(countInterval);
+    _sendCurrentChunk();
+  }, VAD_SILENCE_MS);
+  silenceTimer._countInterval = countInterval;
+}
+
+function _clearSilenceTimer() {
+  if (silenceTimer) {
+    if (silenceTimer._countInterval) clearInterval(silenceTimer._countInterval);
+    clearTimeout(silenceTimer);
+    silenceTimer = null;
+  }
+}
+
+// Send the buffered audio WITHOUT stopping the MediaRecorder.
+//
+// Key insight: stopping and restarting MediaRecorder on the same stream causes
+// subsequent blobs to lack the WebM initialization segment (codec headers),
+// making them undecodable by ffmpeg/Whisper on the server.
+//
+// Solution: keep ONE MediaRecorder running the entire conversation.
+// Each turn we just snapshot + clear audioChunks. The continuous stream
+// means every blob shares the same codec headers from the first chunk
+// (which is always included because we never reset the recorder).
+// We prepend the first-ever chunk (the init segment) to every subsequent
+// turn's blob so the server always gets a self-contained, decodable file.
+let _initChunk = null; // the very first ondataavailable chunk (has codec headers)
+
+function _sendCurrentChunk() {
+  if (!isRecording || !mediaRecorder || mediaRecorder.state === 'inactive') {
+    _resumeListening();
+    return;
+  }
+
+  // Flush any partial buffered chunk right now
+  if (mediaRecorder.state === 'recording') mediaRecorder.requestData();
+
+  // Give the browser one tick to deliver the requestData chunk
+  setTimeout(() => {
+    _setStatusBar('⏳ Processing your message...');
+    _updateMicUI('processing');
+    ttsPlaying = true;
+
+    // Snapshot current chunks and reset buffer for next turn
+    const turnChunks = audioChunks.slice();
+    audioChunks = [];
+
+    if (turnChunks.length === 0) {
+      ttsPlaying = false;
+      _resumeListening();
+      return;
+    }
+
+    // Save first chunk as init segment if not yet saved
+    if (!_initChunk) _initChunk = turnChunks[0];
+
+    // Build blob: always prepend init segment so the WebM is self-contained
+    // (skip prepending if this IS turn 1, i.e. turnChunks already starts with it)
+    const blobParts = (turnChunks[0] === _initChunk)
+      ? turnChunks
+      : [_initChunk, ...turnChunks];
+
+    sendVoiceMessage(new Blob(blobParts, { type: 'audio/webm' }));
+  }, 150); // 150ms = enough for requestData to fire ondataavailable
+}
+
+// Called after AI reply is fully delivered — resume listening
+function _resumeListening() {
+  if (!convMode) return;
+  isSpeaking = false;
+  ttsPlaying = false;
+  _clearSilenceTimer();
+  _updateMicUI('listening');
+  _setStatusBar('👂 Your turn — speak whenever you\'re ready');
+}
+
+// Full stop — tears down mic and audio context
+function vadStop(sendPending) {
+  if (vadAnimFrame) { cancelAnimationFrame(vadAnimFrame); vadAnimFrame = null; }
+  _clearSilenceTimer();
+
+  const cleanup = () => {
+    vadStream && vadStream.getTracks().forEach(t => t.stop());
+    vadAudioCtx && vadAudioCtx.close().catch(() => {});
+    vadStream = null; vadAudioCtx = null; vadAnalyser = null;
+  };
+
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.onstop = () => {
+      if (sendPending && audioChunks.length > 0)
+        sendVoiceMessage(new Blob(audioChunks, { type: 'audio/webm' }));
+      audioChunks = [];
+      cleanup();
+    };
+    mediaRecorder.stop();
+  } else {
+    audioChunks = [];
+    cleanup();
+  }
+
   isRecording = false;
-  const micBtn = document.getElementById('mic-btn');
-  micBtn.classList.remove('recording');
-  micBtn.textContent = '🎤';
-  micBtn.title = 'Click to record voice';
-  // Immediately remove the "Recording..." indicator
-  removeVoiceIndicators();
+  isSpeaking = false;
+  ttsPlaying = false;
+  _updateMicUI('idle');
+  _setStatusBar('');
+}
+
+// ── VAD UI Helpers ──
+
+function _updateMicUI(state) {
+  const btn = document.getElementById('mic-btn');
+  if (!btn) return;
+  btn.classList.remove('recording', 'speaking', 'processing');
+  if (state === 'idle') {
+    btn.textContent = '🎤';
+    btn.title = 'Start voice conversation (mic stays on until you click again)';
+  } else if (state === 'listening') {
+    btn.classList.add('recording');
+    btn.textContent = '👂';
+    btn.title = 'Listening — click to end call';
+  } else if (state === 'speaking') {
+    btn.classList.add('recording', 'speaking');
+    btn.textContent = '🗣️';
+    btn.title = 'You\'re speaking...';
+  } else if (state === 'processing') {
+    btn.classList.add('recording');
+    btn.textContent = '⏳';
+    btn.title = 'Processing...';
+  }
+}
+
+function _setStatusBar(text) {
+  let bar = document.getElementById('vad-status-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'vad-status-bar';
+    bar.className = 'vad-status-bar';
+    const inputArea = document.querySelector('.chat-input-area') ||
+                      document.getElementById('chat-input')?.parentElement;
+    if (inputArea) inputArea.insertBefore(bar, inputArea.firstChild);
+  }
+  bar.textContent = text;
+  bar.style.display = text ? 'block' : 'none';
 }
 
 function removeVoiceIndicators() {
   const chatContainer = document.getElementById('chat-messages');
-  chatContainer.querySelectorAll('.voice-processing').forEach(el => {
+  chatContainer && chatContainer.querySelectorAll('.voice-processing').forEach(el => {
     const msgDiv = el.closest('.chat-msg');
     if (msgDiv) msgDiv.remove();
   });
@@ -235,6 +430,7 @@ function handleVoiceResult(msg) {
 
   if (msg.error) {
     addChatMsg('system', '⚠️ ' + msg.error);
+    _resumeListening(); // un-mute VAD so user can try again
     return;
   }
 
@@ -260,6 +456,8 @@ function handleVoiceResult(msg) {
   const c = document.getElementById('chat-messages');
   c.appendChild(div);
   c.scrollTop = c.scrollHeight;
+  // Note: _resumeListening() fires when the AI's chat_response arrives, not here,
+  // so the mic stays muted while the server is still generating the reply.
 }
 
 function endSession() { 
@@ -310,17 +508,32 @@ function initSeverityChart() {
 
 function updateTelemetry(d) {
   const sev=d.severity||0, avg=d.avg_severity||0, f=d.facial||{};
-  document.getElementById('tel-distress').textContent=sev.toFixed(2);
-  document.getElementById('tel-distress-bar').style.width=(sev*100)+'%';
+  const camActive = Object.keys(f).length > 0;
+
+  if (camActive) {
+    document.getElementById('tel-distress').textContent=sev.toFixed(2);
+    document.getElementById('tel-distress-bar').style.width=(sev*100)+'%';
+    const em=f.dominant_emotion||'—';
+    document.getElementById('tel-emotion').textContent=em.charAt(0).toUpperCase()+em.slice(1);
+    document.getElementById('tel-valence').textContent=(f.facial_valence||0).toFixed(2);
+    document.getElementById('tel-eye').textContent=((f.eye_contact_ratio||0)*100).toFixed(0)+'%';
+    document.getElementById('tel-blink').textContent=(f.blink_rate||0).toFixed(1);
+    document.getElementById('vid-severity').textContent='Severity: '+sev.toFixed(2);
+    document.getElementById('vid-emotion').textContent='Emotion: '+(em.charAt(0).toUpperCase()+em.slice(1));
+  } else {
+    document.getElementById('tel-distress').textContent='Cam Off';
+    document.getElementById('tel-distress-bar').style.width='0%';
+    document.getElementById('tel-emotion').textContent='—';
+    document.getElementById('tel-valence').textContent='—';
+    document.getElementById('tel-eye').textContent='—';
+    document.getElementById('tel-blink').textContent='—';
+    document.getElementById('vid-severity').textContent='Severity: —';
+    document.getElementById('vid-emotion').textContent='Emotion: —';
+  }
+
   document.getElementById('tel-avg-risk').textContent=(avg*100).toFixed(1)+'%';
   document.getElementById('tel-avg-bar').style.width=(avg*100)+'%';
-  const em=f.dominant_emotion||'—';
-  document.getElementById('tel-emotion').textContent=em.charAt(0).toUpperCase()+em.slice(1);
-  document.getElementById('tel-valence').textContent=(f.facial_valence||0).toFixed(2);
-  document.getElementById('tel-eye').textContent=((f.eye_contact_ratio||0)*100).toFixed(0)+'%';
-  document.getElementById('tel-blink').textContent=(f.blink_rate||0).toFixed(1);
-  document.getElementById('vid-severity').textContent='Severity: '+sev.toFixed(2);
-  document.getElementById('vid-emotion').textContent='Emotion: '+(em.charAt(0).toUpperCase()+em.slice(1));
+
   // Safety
   if(d.halted) {
     // Show halt indicator in Psychologist page if needed, or just chat
@@ -334,7 +547,7 @@ function updateTelemetry(d) {
     const mins = Math.floor(elapsed/60);
     const secs = elapsed%60;
     sevLabels.push(mins+':'+String(secs).padStart(2,'0'));
-    sevHistory.push(sev);
+    sevHistory.push(camActive ? sev : null);
     if(sevHistory.length > 60) { sevHistory.shift(); sevLabels.shift(); }
     if(severityChart) severityChart.update('none');
   }
@@ -862,5 +1075,4 @@ async function generateIntegrated(){
 }
 
 // ── Init ──
-if(token&&user) enterApp(); 
-
+if(token&&user) enterApp();

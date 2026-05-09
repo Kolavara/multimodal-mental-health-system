@@ -1,252 +1,298 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Multimodal Clinical AI Platform — Psychologist">
     <title>🧠 Psychologist — Clinical AI</title>
-    <link rel="stylesheet" href="/static/style.css?v=2">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=6">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 </head>
+
 <body>
 
-<!-- ════════════════════════════════════════════════════════════
+    <!-- ════════════════════════════════════════════════════════════
      LOGIN PAGE
      ════════════════════════════════════════════════════════════ -->
-<div id="login-page" class="page active">
-    <div class="login-page">
-        <div class="login-card neu-card">
-            <h1 style="text-align:center;margin-bottom:0.25rem;">🧠 Multimodal Clinical AI</h1>
-            <p class="text-muted text-center mb-3" style="font-size:0.9rem;">Sign in to access the platform</p>
+    <div id="login-page" class="page active">
+        <div class="login-page">
+            <div class="login-card neu-card">
+                <h1 style="text-align:center;margin-bottom:0.25rem;">🧠 Multimodal Clinical AI</h1>
+                <p class="text-muted text-center mb-3" style="font-size:0.9rem;">Sign in to access the platform</p>
 
-            <div class="tab-bar" id="auth-tabs">
-                <button class="tab-btn active" onclick="switchAuthTab('login')">🔐 Login</button>
-                <button class="tab-btn" onclick="switchAuthTab('register')">📝 Register</button>
-            </div>
+                <div class="tab-bar" id="auth-tabs">
+                    <button class="tab-btn active" onclick="switchAuthTab('login')">🔐 Login</button>
+                    <button class="tab-btn" onclick="switchAuthTab('register')">📝 Register</button>
+                </div>
 
-            <!-- Login Form -->
-            <div id="login-form">
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" id="login-username" class="input-field" placeholder="Enter username">
+                <!-- Login Form -->
+                <div id="login-form">
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="login-username" class="input-field" placeholder="Enter username">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="login-password" class="input-field" placeholder="Enter password">
+                    </div>
+                    <button class="btn btn-primary btn-full mt-2" onclick="doLogin()">Sign In</button>
+                    <div id="login-error" class="alert alert-error hidden mt-2"></div>
                 </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="login-password" class="input-field" placeholder="Enter password">
-                </div>
-                <button class="btn btn-primary btn-full mt-2" onclick="doLogin()">Sign In</button>
-                <div id="login-error" class="alert alert-error hidden mt-2"></div>
-            </div>
 
-            <!-- Register Form -->
-            <div id="register-form" class="hidden">
-                <div class="form-group">
-                    <label>Display Name</label>
-                    <input type="text" id="reg-name" class="input-field" placeholder="Your full name">
+                <!-- Register Form -->
+                <div id="register-form" class="hidden">
+                    <div class="form-group">
+                        <label>Display Name</label>
+                        <input type="text" id="reg-name" class="input-field" placeholder="Your full name">
+                    </div>
+                    <div class="form-group">
+                        <label>Username</label>
+                        <input type="text" id="reg-username" class="input-field" placeholder="Choose username">
+                    </div>
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input type="password" id="reg-password" class="input-field"
+                            placeholder="Choose password (min 4)">
+                    </div>
+                    <button class="btn btn-primary btn-full mt-2" onclick="doRegister()">Create Account</button>
+                    <div id="reg-error" class="alert alert-error hidden mt-2"></div>
+                    <div id="reg-success" class="alert alert-success hidden mt-2"></div>
                 </div>
-                <div class="form-group">
-                    <label>Username</label>
-                    <input type="text" id="reg-username" class="input-field" placeholder="Choose username">
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="reg-password" class="input-field" placeholder="Choose password (min 4)">
-                </div>
-                <button class="btn btn-primary btn-full mt-2" onclick="doRegister()">Create Account</button>
-                <div id="reg-error" class="alert alert-error hidden mt-2"></div>
-                <div id="reg-success" class="alert alert-success hidden mt-2"></div>
-            </div>
 
-            <!-- Quick Login -->
-            <hr>
-            <p class="text-muted text-center text-sm mb-1">Quick Demo Access</p>
-            <div class="quick-login">
-                <button class="btn" onclick="quickLogin('demo_user','demo123')">👤 Demo User</button>
-                <button class="btn" onclick="quickLogin('demo_admin','admin123')">🔑 Demo Admin</button>
+                <!-- Quick Login -->
+                <hr>
+                <p class="text-muted text-center text-sm mb-1">Quick Demo Access</p>
+                <div class="quick-login">
+                    <button class="btn" onclick="quickLogin('demo_user','demo123')">👤 Demo User</button>
+                    <button class="btn" onclick="quickLogin('demo_admin','admin123')">🔑 Demo Admin</button>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<!-- ════════════════════════════════════════════════════════════
+    <!-- ════════════════════════════════════════════════════════════
      APP SHELL (sidebar + main area, shown after login)
      ════════════════════════════════════════════════════════════ -->
-<div id="app-shell" class="app-layout hidden">
+    <div id="app-shell" class="app-layout hidden">
 
-    <!-- ── Sidebar ────────────────────────────────────────────── -->
-    <nav class="sidebar" id="sidebar">
-        <div class="user-info" id="sidebar-user">
-            <p class="sidebar-section" id="sidebar-session-title">Patient Session</p>
-            <h4 id="sidebar-name">—</h4>
-            <span class="role-badge" id="sidebar-role">—</span>
-        </div>
-
-        <a class="nav-item active" data-page="psychologist" onclick="navigate('psychologist')">🧠 Psychologist</a>
-        <a class="nav-item" data-page="psychiatrist" onclick="navigate('psychiatrist')">⚕️ Psychiatrist Report</a>
-        <a class="nav-item" data-page="reports" onclick="navigate('reports')">📂 Previous Reports</a>
-        <a class="nav-item" data-page="admin" onclick="navigate('admin')">🔑 Admin Portal</a>
-
-        <!-- Patient Controls (Hidden for Admins) -->
-        <div id="patient-controls">
-            <div class="sidebar-section mt-3">Session Duration</div>
-            <div class="timer" id="session-timer">00:00:00</div>
-            <button class="btn btn-full mt-2" id="start-session-btn" onclick="startSession()" style="background:var(--accent-success);color:#fff;">▶ Start Session</button>
-            <button class="btn btn-danger btn-full mt-2 hidden" id="end-session-sidebar-btn" onclick="endSession()">📋 End Session</button>
-            <div class="kill-switch mt-3">
-                <button class="btn btn-danger" id="kill-switch-btn" onclick="emergencyHalt()">🔴 Emergency Override (Kill Switch)</button>
+        <!-- ── Sidebar ────────────────────────────────────────────── -->
+        <nav class="sidebar" id="sidebar">
+            <div class="user-info" id="sidebar-user">
+                <p class="sidebar-section" id="sidebar-session-title">Patient Session</p>
+                <h4 id="sidebar-name">—</h4>
+                <span class="role-badge" id="sidebar-role">—</span>
             </div>
-        </div>
 
-        <!-- Logout (Always visible) -->
-        <div style="margin-top:1rem;">
-            <button class="btn btn-full" onclick="doLogout()">🚪 Logout</button>
-        </div>
-    </nav>
+            <a class="nav-item active" data-page="psychologist" onclick="navigate('psychologist')">🧠 Psychologist</a>
+            <a class="nav-item" data-page="psychiatrist" onclick="navigate('psychiatrist')">⚕️ Psychiatrist Report</a>
+            <a class="nav-item" data-page="reports" onclick="navigate('reports')">📂 Previous Reports</a>
+            <a class="nav-item" data-page="admin" onclick="navigate('admin')">🔑 Admin Portal</a>
 
-    <!-- ── Main Content Area ──────────────────────────────────── -->
-    <main class="main-content">
-        <!-- Theme Toggle -->
-        <button id="theme-toggle-btn" class="btn" style="position: absolute; top: 1.5rem; right: 2.5rem; z-index: 1000; padding: 0.5rem 1rem; border-radius: var(--radius-btn); box-shadow: var(--extruded-small);" onclick="toggleTheme()">🌓 Toggle Theme</button>
+            <!-- Patient Controls (Hidden for Admins) -->
+            <div id="patient-controls">
+                <div class="sidebar-section mt-3">Session Duration</div>
+                <div class="timer" id="session-timer">00:00:00</div>
+                <button class="btn btn-full mt-2" id="start-session-btn" onclick="startSession()"
+                    style="background:var(--accent-success);color:#fff;">▶ Start Session</button>
+                <button class="btn btn-danger btn-full mt-2 hidden" id="end-session-sidebar-btn"
+                    onclick="endSession()">📋 End Session</button>
+                <div class="kill-switch mt-3">
+                    <button class="btn btn-danger" id="kill-switch-btn" onclick="emergencyHalt()">🔴 Emergency Override
+                        (Kill Switch)</button>
+                </div>
+            </div>
 
-        <!-- PSYCHOLOGIST PAGE ──────────────────────────────────── -->
-        <div id="page-psychologist" class="page active">
-            <h1>🧠 Multimodal Clinical AI Platform</h1>
+            <!-- Logout (Always visible) -->
+            <div style="margin-top:1rem;">
+                <button class="btn btn-full" onclick="doLogout()">🚪 Logout</button>
+            </div>
+        </nav>
 
-            <div class="grid-60-40 mt-3">
-                <!-- Left Column: Video + Telemetry -->
-                <div>
-                    <div class="neu-card">
-                        <p class="section-header">🎥 Patient Observation</p>
-                        <div class="video-container" id="video-box">
-                            <video id="local-video" autoplay playsinline muted></video>
-                            <canvas id="video-canvas" style="display:none;"></canvas>
-                            <div class="video-overlay">
-                                <span class="video-badge" id="vid-severity">Severity: 0.00</span>
-                                <span class="video-badge" id="vid-emotion">Emotion: —</span>
+        <!-- ── Main Content Area ──────────────────────────────────── -->
+        <main class="main-content">
+            <!-- Theme Toggle -->
+            <button id="theme-toggle-btn" class="btn"
+                style="position: absolute; top: 1.5rem; right: 2.5rem; z-index: 1000; padding: 0.5rem 1rem; border-radius: var(--radius-btn); box-shadow: var(--extruded-small);"
+                onclick="toggleTheme()">🌓 Toggle Theme</button>
+
+            <!-- PSYCHOLOGIST PAGE ──────────────────────────────────── -->
+            <div id="page-psychologist" class="page active">
+                <h1>🧠 Multimodal Clinical AI Platform</h1>
+
+                <div class="grid-60-40 mt-3">
+                    <!-- Left Column: Video + Telemetry -->
+                    <div>
+                        <div class="neu-card">
+                            <p class="section-header">🎥 Patient Observation</p>
+                            <div class="video-container" id="video-box">
+                                <video id="local-video" autoplay playsinline muted></video>
+                                <canvas id="video-canvas" style="display:none;"></canvas>
+                                <div class="video-overlay">
+                                    <span class="video-badge" id="vid-severity">Severity: 0.00</span>
+                                    <span class="video-badge" id="vid-emotion">Emotion: —</span>
+                                </div>
+                            </div>
+                            <div class="flex gap-2 mt-2">
+                                <button class="btn" id="start-video-btn" onclick="startVideo()">▶ Start</button>
+                                <select id="camera-select" class="input-field" style="flex:1;"></select>
                             </div>
                         </div>
-                        <div class="flex gap-2 mt-2">
-                            <button class="btn" id="start-video-btn" onclick="startVideo()">▶ Start</button>
-                            <select id="camera-select" class="input-field" style="flex:1;"></select>
+
+                        <!-- Telemetry -->
+                        <div class="neu-card">
+                            <p class="section-header">📡 Live Telemetry</p>
+                            <div class="mb-1 text-sm">Current Distress: <strong id="tel-distress">0.00</strong></div>
+                            <div class="progress-bar mb-2">
+                                <div class="progress-fill" id="tel-distress-bar" style="width:0%"></div>
+                            </div>
+                            <div class="mb-1 text-sm">Average Severe Disorder Risk: <strong
+                                    id="tel-avg-risk">0.0%</strong></div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="tel-avg-bar" style="width:0%"></div>
+                            </div>
+                            <div class="grid-4 mt-2">
+                                <div class="metric-card">
+                                    <div class="metric-label">Emotion</div>
+                                    <div class="metric-value" id="tel-emotion">—</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">Valence</div>
+                                    <div class="metric-value" id="tel-valence">0.00</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">Eye Contact</div>
+                                    <div class="metric-value" id="tel-eye">0%</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">Blink Rate</div>
+                                    <div class="metric-value" id="tel-blink">0</div>
+                                </div>
+                            </div>
+                            <!-- Severity Trend Chart -->
+                            <div class="mt-3">
+                                <p class="text-sm text-muted mb-1" style="font-weight:600;">📈 Severity Trend</p>
+                                <div style="height:160px;position:relative;">
+                                    <canvas id="severity-chart"></canvas>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Telemetry -->
-                    <div class="neu-card">
-                        <p class="section-header">📡 Live Telemetry</p>
-                        <div class="mb-1 text-sm">Current Distress: <strong id="tel-distress">0.00</strong></div>
-                        <div class="progress-bar mb-2"><div class="progress-fill" id="tel-distress-bar" style="width:0%"></div></div>
-                        <div class="mb-1 text-sm">Average Severe Disorder Risk: <strong id="tel-avg-risk">0.0%</strong></div>
-                        <div class="progress-bar"><div class="progress-fill" id="tel-avg-bar" style="width:0%"></div></div>
-                        <div class="grid-4 mt-2">
-                            <div class="metric-card"><div class="metric-label">Emotion</div><div class="metric-value" id="tel-emotion">—</div></div>
-                            <div class="metric-card"><div class="metric-label">Valence</div><div class="metric-value" id="tel-valence">0.00</div></div>
-                            <div class="metric-card"><div class="metric-label">Eye Contact</div><div class="metric-value" id="tel-eye">0%</div></div>
-                            <div class="metric-card"><div class="metric-label">Blink Rate</div><div class="metric-value" id="tel-blink">0</div></div>
-                        </div>
-                        <!-- Severity Trend Chart -->
-                        <div class="mt-3">
-                            <p class="text-sm text-muted mb-1" style="font-weight:600;">📈 Severity Trend</p>
-                            <div style="height:160px;position:relative;">
-                                <canvas id="severity-chart"></canvas>
+                    <!-- Right Column: Chat -->
+                    <div style="position:sticky;top:2rem;align-self:start;">
+                        <div class="neu-card" style="padding:0;overflow:hidden;">
+                            <div style="padding:1.25rem 1.5rem;">
+                                <p class="section-header" id="chat-agent-label">💬 Clinical Interaction — Psychologist
+                                    Active</p>
+                            </div>
+                            <div class="chat-container">
+                                <div class="chat-messages" id="chat-messages"></div>
+                                <div class="chat-input-area">
+                                    <input type="text" id="chat-input" class="input-field"
+                                        placeholder="Type your response..."
+                                        onkeydown="if(event.key==='Enter')sendChat()">
+                                    <button class="btn mic-btn" id="mic-btn" onclick="toggleMic()"
+                                        title="Hold to record voice">🎤</button>
+                                    <button class="btn" onclick="sendChat()">➤</button>
+                                </div>
+                                <div style="padding:0.75rem 1rem;border-top:1px solid rgba(163,177,198,0.2);">
+                                    <button class="btn btn-danger btn-full" id="end-session-btn"
+                                        onclick="endSession()">📋 End Session & Evaluate</button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Right Column: Chat -->
-                <div style="position:sticky;top:2rem;align-self:start;">
-                    <div class="neu-card" style="padding:0;overflow:hidden;">
-                        <div style="padding:1.25rem 1.5rem;">
-                            <p class="section-header" id="chat-agent-label">💬 Clinical Interaction — Psychologist Active</p>
-                        </div>
-                        <div class="chat-container">
-                            <div class="chat-messages" id="chat-messages"></div>
-                            <div class="chat-input-area">
-                                <input type="text" id="chat-input" class="input-field" placeholder="Type your response..." onkeydown="if(event.key==='Enter')sendChat()">
-                                <button class="btn mic-btn" id="mic-btn" onclick="toggleMic()" title="Hold to record voice">🎤</button>
-                                <button class="btn" onclick="sendChat()">➤</button>
-                            </div>
-                            <div style="padding:0.75rem 1rem;border-top:1px solid rgba(163,177,198,0.2);">
-                                <button class="btn btn-danger btn-full" id="end-session-btn" onclick="endSession()">📋 End Session & Evaluate</button>
-                            </div>
-                        </div>
+                <!-- Evaluation Result -->
+                <div id="evaluation-result" class="neu-card hidden mt-3">
+                    <p class="section-header">📋 Session Evaluation</p>
+                    <div id="eval-content"></div>
+                </div>
+            </div>
+
+
+            <!-- PSYCHIATRIST PAGE ──────────────────────────────────── -->
+            <div id="page-psychiatrist" class="page">
+                <h1>⚕️ Psychiatrist Diagnostic Report</h1>
+
+                <div class="neu-card mt-3">
+                    <p class="section-header">📄 Upload Patient Report (PDF)</p>
+                    <p class="text-muted text-sm mb-3">The system will extract values, compare them against standard
+                        clinical thresholds, and generate a diagnostic triage report.</p>
+                    <div class="file-upload-wrapper">
+                        <label for="pdf-upload" class="file-upload-label">
+                            <span>📁</span>
+                            <span>Click to choose PDF report</span>
+                        </label>
+                        <input type="file" id="pdf-upload" accept=".pdf" onchange="uploadPDF()">
+                        <div id="file-name" class="file-name-display hidden"></div>
                     </div>
                 </div>
-            </div>
 
-            <!-- Evaluation Result -->
-            <div id="evaluation-result" class="neu-card hidden mt-3">
-                <p class="section-header">📋 Session Evaluation</p>
-                <div id="eval-content"></div>
-            </div>
-        </div>
-
-
-        <!-- PSYCHIATRIST PAGE ──────────────────────────────────── -->
-        <div id="page-psychiatrist" class="page">
-            <h1>⚕️ Psychiatrist Diagnostic Report</h1>
-
-            <div class="neu-card mt-3">
-                <p class="section-header">📄 Upload Patient Report (PDF)</p>
-                <p class="text-muted text-sm mb-3">The system will extract values, compare them against standard clinical thresholds, and generate a diagnostic triage report.</p>
-                <div class="file-upload-wrapper">
-                    <label for="pdf-upload" class="file-upload-label">
-                        <span>📁</span>
-                        <span>Click to choose PDF report</span>
-                    </label>
-                    <input type="file" id="pdf-upload" accept=".pdf" onchange="uploadPDF()">
-                    <div id="file-name" class="file-name-display hidden"></div>
-                </div>
-            </div>
-
-            <div class="neu-card">
-                <p class="section-header">✏️ Or Enter Values Manually</p>
-                <div id="manual-params" class="grid-3 gap-2"></div>
-                <button class="btn btn-full mt-2" onclick="analyzeManual()">Generate Report from Manual Values</button>
-            </div>
-
-            <!-- Results -->
-            <div id="psych-results" class="hidden">
                 <div class="neu-card">
-                    <p class="section-header">📊 Diagnostic Summary</p>
-                    <div class="grid-3">
-                        <div class="metric-card"><div class="metric-label">Parameters Analyzed</div><div class="metric-value" id="psych-count">0</div></div>
-                        <div class="metric-card"><div class="metric-label">Abnormalities Found</div><div class="metric-value" id="psych-abnormal">0</div></div>
-                        <div class="metric-card"><div class="metric-label">Overall Risk</div><div class="metric-value" id="psych-risk">LOW</div></div>
-                    </div>
+                    <p class="section-header">✏️ Or Enter Values Manually</p>
+                    <div id="manual-params" class="grid-3 gap-2"></div>
+                    <button class="btn btn-full mt-2" onclick="analyzeManual()">Generate Report from Manual
+                        Values</button>
                 </div>
-                <div id="psych-abnormal-list"></div>
-                <div id="psych-normal-list"></div>
+
+                <!-- Results -->
+                <div id="psych-results" class="hidden">
+                    <div class="neu-card">
+                        <p class="section-header">📊 Diagnostic Summary</p>
+                        <div class="grid-3">
+                            <div class="metric-card">
+                                <div class="metric-label">Parameters Analyzed</div>
+                                <div class="metric-value" id="psych-count">0</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-label">Abnormalities Found</div>
+                                <div class="metric-value" id="psych-abnormal">0</div>
+                            </div>
+                            <div class="metric-card">
+                                <div class="metric-label">Overall Risk</div>
+                                <div class="metric-value" id="psych-risk">LOW</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="psych-abnormal-list"></div>
+                    <div id="psych-normal-list"></div>
+                </div>
+
+                <!-- Integrated Diagnosis -->
+                <div id="psych-integrated" class="neu-card hidden">
+                    <p class="section-header">🧬 Integrated Clinical Summary</p>
+                    <div id="psych-sources"></div>
+                    <hr>
+                    <button class="btn btn-primary btn-full" onclick="generateIntegrated()">🧬 Generate Integrated
+                        Diagnosis & Recommendations</button>
+                    <div id="psych-integrated-result" class="hidden mt-2"></div>
+                </div>
             </div>
 
-            <!-- Integrated Diagnosis -->
-            <div id="psych-integrated" class="neu-card hidden">
-                <p class="section-header">🧬 Integrated Clinical Summary</p>
-                <div id="psych-sources"></div>
-                <hr>
-                <button class="btn btn-primary btn-full" onclick="generateIntegrated()">🧬 Generate Integrated Diagnosis & Recommendations</button>
-                <div id="psych-integrated-result" class="hidden mt-2"></div>
+            <!-- PREVIOUS REPORTS PAGE ──────────────────────────────── -->
+            <div id="page-reports" class="page">
+                <h1>📂 Previous Reports</h1>
+                <div id="reports-loading" class="spinner mt-3"></div>
+                <div id="reports-content" class="hidden mt-3"></div>
             </div>
-        </div>
 
-        <!-- PREVIOUS REPORTS PAGE ──────────────────────────────── -->
-        <div id="page-reports" class="page">
-            <h1>📂 Previous Reports</h1>
-            <div id="reports-loading" class="spinner mt-3"></div>
-            <div id="reports-content" class="hidden mt-3"></div>
-        </div>
+            <!-- ADMIN PAGE ─────────────────────────────────────────── -->
+            <div id="page-admin" class="page">
+                <h1>🔑 Administrator Portal</h1>
+                <div id="admin-loading" class="spinner mt-3"></div>
+                <div id="admin-content" class="hidden mt-3"></div>
+            </div>
 
-        <!-- ADMIN PAGE ─────────────────────────────────────────── -->
-        <div id="page-admin" class="page">
-            <h1>🔑 Administrator Portal</h1>
-            <div id="admin-loading" class="spinner mt-3"></div>
-            <div id="admin-content" class="hidden mt-3"></div>
-        </div>
+        </main>
+    </div>
 
-    </main>
-</div>
-
-<script src="/static/app.js?v=2"></script>
+    <script src="/static/app.js?v=2"></script>
 </body>
+
 </html>

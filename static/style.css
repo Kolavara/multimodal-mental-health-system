@@ -784,25 +784,54 @@ hr {
 }
 
 .mic-btn.recording {
-    background: var(--accent-danger);
+    background: var(--accent-secondary);
     color: #fff;
-    animation: mic-pulse 1.2s ease-in-out infinite;
+    animation: mic-listen 2s ease-in-out infinite;
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4);
+}
+
+/* Actively speaking — brighter pulse */
+.mic-btn.recording.speaking {
+    background: var(--accent-danger);
+    animation: mic-speak 0.6s ease-in-out infinite;
     box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
 }
 
-@keyframes mic-pulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5);
-    }
-    50% {
-        box-shadow: 0 0 0 12px rgba(239, 68, 68, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
-    }
+@keyframes mic-listen {
+    0%   { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.5); }
+    50%  { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
 }
 
-/* Voice processing indicator */
+@keyframes mic-speak {
+    0%   { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); transform: scale(1); }
+    50%  { box-shadow: 0 0 0 14px rgba(239, 68, 68, 0); transform: scale(1.08); }
+    100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); transform: scale(1); }
+}
+
+/* VAD status bar — sits above chat input */
+.vad-status-bar {
+    display: none;
+    padding: 6px 14px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-surface);
+    border-radius: 8px;
+    margin-bottom: 6px;
+    letter-spacing: 0.01em;
+    transition: opacity 0.2s;
+}
+
+/* Processing state for mic button */
+.mic-btn.processing {
+    background: var(--accent-secondary);
+    color: #fff;
+    animation: mic-listen 1.5s ease-in-out infinite;
+    opacity: 0.75;
+}
+
+
 .voice-processing {
     display: inline-flex;
     align-items: center;
@@ -851,4 +880,3 @@ hr {
     margin-top: 6px;
     font-weight: 500;
 }
-
