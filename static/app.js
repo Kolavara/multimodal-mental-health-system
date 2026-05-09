@@ -592,8 +592,16 @@ async function startVideo() {
 
 // ── Evaluation ──
 function renderMarkdown(text) {
-  // Simple markdown: **bold**, newlines → <br>
-  return (text||'').replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+  let html = (text||'')
+    .replace(/^### (.*$)/gim, '<h5 class="mt-2 mb-1" style="color:var(--text-primary)">$1</h5>')
+    .replace(/^## (.*$)/gim, '<h4 class="mt-2 mb-1" style="color:var(--text-primary)">$1</h4>')
+    .replace(/^# (.*$)/gim, '<h3 class="mt-2 mb-1" style="color:var(--text-primary)">$1</h3>')
+    .replace(/^\* (.*$)/gim, '• $1')
+    .replace(/^- (.*$)/gim, '• $1')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>');
+  return html.replace(/(<br>\s*){3,}/g, '<br><br>');
 }
 
 function showEvaluation(d) {
@@ -707,7 +715,7 @@ async function loadReports() {
       } catch(e) {}
       html+='<details class="expander"><summary>⚕️ Psychiatrist Findings</summary><div class="expander-content">'+psychHtml+'</div></details>';
       
-      html+='<details class="expander"><summary>🧬 Integrated Summary</summary><div class="expander-content">'+(rp.integrated_summary||'<p class="text-muted">No integrated summary.</p>')+'</div></details></div>';
+      html+='<details class="expander"><summary>🧬 Integrated Summary</summary><div class="expander-content" style="line-height:1.7">'+(rp.integrated_summary?renderMarkdown(rp.integrated_summary):'<p class="text-muted">No integrated summary.</p>')+'</div></details></div>';
     });
     el.innerHTML=html;
 
@@ -872,7 +880,7 @@ async function viewPatient(uid,name) {
     } catch(e) {}
     html+='<details class="expander"><summary>⚕️ Psychiatrist Findings</summary><div class="expander-content">'+psychHtml+'</div></details>';
     
-    html+='<details class="expander"><summary>🧬 Integrated Summary</summary><div class="expander-content">'+(rp.integrated_summary||'<p class="text-muted">No integrated summary.</p>')+'</div></details></div>';
+    html+='<details class="expander"><summary>🧬 Integrated Summary</summary><div class="expander-content" style="line-height:1.7">'+(rp.integrated_summary?renderMarkdown(rp.integrated_summary):'<p class="text-muted">No integrated summary.</p>')+'</div></details></div>';
   });
   det.innerHTML=html;
 
@@ -1068,7 +1076,7 @@ async function generateIntegrated(){
     const r=await fetch('/api/psychiatrist/integrate',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(body)});
     const d=await r.json();
     if(!r.ok) throw new Error(d.detail||'Failed');
-    document.getElementById('psych-integrated-result').innerHTML='<hr><h4>🩺 Integrated Clinical Assessment</h4><div style="white-space:pre-wrap;line-height:1.7">'+d.summary+'</div>';
+    document.getElementById('psych-integrated-result').innerHTML='<hr><h4 class="mb-2">🩺 Integrated Clinical Assessment</h4><div style="line-height:1.7;color:var(--text-primary)">'+renderMarkdown(d.summary)+'</div>';
   } catch(e) {
     document.getElementById('psych-integrated-result').innerHTML='<div class="alert alert-error">⚠️ Failed to generate summary: '+e.message+'</div>';
   }
