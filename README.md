@@ -1,5 +1,12 @@
 # 🧠 Multimodal Clinical AI Platform
 
+
+
+
+https://github.com/user-attachments/assets/6a800e01-d909-43f9-8854-182f54a28da8
+
+
+
 A state-of-the-art, local-first multimodal clinical AI platform built to assist healthcare professionals in diagnosing and tracking mental health disorders. The platform integrates real-time facial emotion recognition, speech sentiment analysis, and a LangGraph-powered AI conversational agent.
 
 Recently completely re-architected from a Streamlit application into a **high-performance FastAPI Single Page Application (SPA)** using WebSockets for real-time, low-latency telemetry and communication.
